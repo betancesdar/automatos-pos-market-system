@@ -14,6 +14,7 @@ export class CheckoutDto {
   applyItbis?: boolean;
   clientRnc?: string;
   paymentMethod?: PaymentMethod;
+  discountAmount?: number;
 }
 
 @Controller('sales')

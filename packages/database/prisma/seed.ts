@@ -20,6 +20,50 @@ const pool = new pg.Pool({ connectionString: DATABASE_URL })
 const adapter = new PrismaPg(pool)
 const prisma = new PrismaClient({ adapter })
 
+const categoryDefs = [
+  { name: 'Bebidas', slug: 'BEBIDAS' },
+  { name: 'Alimentos', slug: 'ALIMENTOS' },
+  { name: 'Limpieza', slug: 'LIMPIEZA' },
+  { name: 'Cuidado Personal', slug: 'CUIDADO_PERSONAL' },
+  { name: 'Otros', slug: 'OTROS' },
+]
+
+const demoProducts = [
+  { barcode: '7460111111111', name: 'Refresco Imperio Rojo 500ml', slug: 'BEBIDAS', price: 25, cost: 15, stock: 100, imageUrl: 'https://images.unsplash.com/photo-1622484214627-4474bfb984ba?w=200&h=200&fit=crop' },
+  { barcode: '7460222222222', name: 'Salami Super Especial Induveca', slug: 'ALIMENTOS', price: 150, cost: 110, stock: 50 },
+  { barcode: '7460333333333', name: 'Ron Brugal Añejo 700ml', slug: 'BEBIDAS', price: 550, cost: 400, stock: 20 },
+  { barcode: '7460444444444', name: 'Jugo Rica Naranja 1L', slug: 'BEBIDAS', price: 80, cost: 60, stock: 40 },
+  { barcode: '7460555555555', name: 'Cerveza Presidente Grande', slug: 'BEBIDAS', price: 180, cost: 130, stock: 200 },
+]
+
+async function ensureDemoTenantData(tenantId: string) {
+  const catMap: Record<string, string> = {}
+  for (const c of categoryDefs) {
+    const cat = await prisma.category.upsert({
+      where: { slug_tenantId: { slug: c.slug, tenantId } },
+      create: { ...c, tenantId },
+      update: {},
+    })
+    catMap[c.slug] = cat.id
+  }
+
+  for (const p of demoProducts) {
+    const { slug, ...rest } = p
+    const existingProduct = p.barcode
+      ? await prisma.product.findUnique({ where: { barcode_tenantId: { barcode: p.barcode, tenantId } } })
+      : null
+    if (existingProduct) {
+      await prisma.product.update({
+        where: { id: existingProduct.id },
+        data: { categoryId: catMap[slug], imageUrl: rest.imageUrl ?? existingProduct.imageUrl },
+      })
+    } else {
+      await prisma.product.create({ data: { ...rest, categoryId: catMap[slug], tenantId } })
+    }
+  }
+  console.log('✅  Categories and demo products synced')
+}
+
 async function main() {
   console.log('🌱  Seeding database...')
 
@@ -43,7 +87,8 @@ async function main() {
 
   const existing = await prisma.tenant.findFirst({ where: { rnc: '123456789' } })
   if (existing) {
-    console.log(`⚠️   Tenant already seeded (id: ${existing.id}). Skipping demo tenant.`)
+    console.log(`⚠️   Tenant already exists (id: ${existing.id}). Ensuring categories & product links…`)
+    await ensureDemoTenantData(existing.id)
     console.log('\n🎉  Seed complete!')
     return
   }
@@ -91,33 +136,7 @@ async function main() {
     ],
   })
 
-  const categoryDefs = [
-    { name: 'Bebidas', slug: 'BEBIDAS' },
-    { name: 'Alimentos', slug: 'ALIMENTOS' },
-    { name: 'Limpieza', slug: 'LIMPIEZA' },
-    { name: 'Cuidado Personal', slug: 'CUIDADO_PERSONAL' },
-    { name: 'Otros', slug: 'OTROS' },
-  ]
-  const catMap: Record<string, string> = {}
-  for (const c of categoryDefs) {
-    const cat = await prisma.category.create({ data: { ...c, tenantId: tenant.id } })
-    catMap[c.slug] = cat.id
-  }
-
-  const products = [
-    { barcode: '7460111111111', name: 'Refresco Imperio Rojo 500ml', slug: 'BEBIDAS', price: 25, cost: 15, stock: 100, imageUrl: 'https://images.unsplash.com/photo-1622484214627-4474bfb984ba?w=200&h=200&fit=crop' },
-    { barcode: '7460222222222', name: 'Salami Super Especial Induveca', slug: 'ALIMENTOS', price: 150, cost: 110, stock: 50 },
-    { barcode: '7460333333333', name: 'Ron Brugal Añejo 700ml', slug: 'BEBIDAS', price: 550, cost: 400, stock: 20 },
-    { barcode: '7460444444444', name: 'Jugo Rica Naranja 1L', slug: 'BEBIDAS', price: 80, cost: 60, stock: 40 },
-    { barcode: '7460555555555', name: 'Cerveza Presidente Grande', slug: 'BEBIDAS', price: 180, cost: 130, stock: 200 },
-  ]
-
-  for (const p of products) {
-    const { slug, ...rest } = p
-    await prisma.product.create({
-      data: { ...rest, categoryId: catMap[slug], tenantId: tenant.id },
-    })
-  }
+  await ensureDemoTenantData(tenant.id)
 
   console.log('\n🎉  Seed complete!')
 }

@@ -51,6 +51,7 @@ export default function POSPage() {
   const router = useRouter();
   const tenantId = user?.tenantId ?? '';
   const searchRef = useRef<HTMLInputElement>(null);
+  const clientRncRef = useRef<HTMLInputElement>(null);
 
   const [products, setProducts] = useState<PosProduct[]>([]);
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -70,12 +71,18 @@ export default function POSPage() {
   const [showCheckout, setShowCheckout] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
+  const [activeLineId, setActiveLineId] = useState<string | null>(null);
+  const [showDiscountModal, setShowDiscountModal] = useState(false);
+  const [discountMode, setDiscountMode] = useState<'fixed' | 'percent'>('fixed');
+  const [discountInput, setDiscountInput] = useState('');
+  const [discountAmount, setDiscountAmount] = useState(0);
   const [lastSale, setLastSale] = useState<{ ncf?: string; total: number } | null>(null);
 
   const receiptConfig = RECEIPT_TYPES.find((r) => r.value === receiptType)!;
   const subtotal = cart.reduce((s, i) => s + lineTotal(i), 0);
-  const itbisAmount = applyItbis ? parseFloat((subtotal - subtotal / 1.18).toFixed(2)) : 0;
-  const grandTotal = subtotal;
+  const netSubtotal = Math.max(0, parseFloat((subtotal - discountAmount).toFixed(2)));
+  const itbisAmount = applyItbis ? parseFloat((netSubtotal - netSubtotal / 1.18).toFixed(2)) : 0;
+  const grandTotal = netSubtotal;
 
   const loadProducts = useCallback(async () => {
     if (!tenantId) return;
@@ -189,6 +196,7 @@ export default function POSPage() {
             applyItbis,
             clientRnc: receiptConfig.needsRnc ? clientRnc : undefined,
             paymentMethod,
+            discountAmount: discountAmount > 0 ? discountAmount : undefined,
           }),
         },
       );
@@ -199,6 +207,7 @@ export default function POSPage() {
 
       setLastSale({ ncf: data.sale.ncf, total: data.sale.total });
       setCart([]);
+      setDiscountAmount(0);
       setShowCheckout(false);
       setCashReceived('');
       setClientRnc('');
@@ -209,15 +218,47 @@ export default function POSPage() {
     }
   };
 
+  const applyDiscount = () => {
+    const val = parseFloat(discountInput) || 0;
+    if (discountMode === 'percent') {
+      setDiscountAmount(parseFloat((subtotal * Math.min(val, 100) / 100).toFixed(2)));
+    } else {
+      setDiscountAmount(Math.min(Math.max(val, 0), subtotal));
+    }
+    setShowDiscountModal(false);
+  };
+
+  const focusClientRnc = () => {
+    setReceiptType('CREDITO_FISCAL');
+    requestAnimationFrame(() => clientRncRef.current?.focus());
+  };
+
+  const focusLineQuantity = () => {
+    const last = cart[cart.length - 1];
+    if (!last) return;
+    const id = activeLineId ?? last.cartId;
+    setActiveLineId(id);
+    setEditingLineId(id);
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        if (e.key === 'F12') { e.preventDefault(); if (cart.length) setShowCheckout(true); }
-        return;
-      }
+      const shortcutKeys = ['F1', 'F2', 'F3', 'F4', 'F5', 'F8', 'F9', 'F10', 'F12'];
+      const isShortcut = shortcutKeys.includes(e.key);
+      const inField = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
+
+      if (inField && !isShortcut) return;
+
       switch (e.key) {
         case 'F1': e.preventDefault(); searchRef.current?.focus(); break;
-        case 'F5': e.preventDefault(); setCart([]); break;
+        case 'F2': e.preventDefault(); focusClientRnc(); break;
+        case 'F3':
+          e.preventDefault();
+          setDiscountInput(discountAmount > 0 ? String(discountAmount) : '');
+          setShowDiscountModal(true);
+          break;
+        case 'F4': e.preventDefault(); focusLineQuantity(); break;
+        case 'F5': e.preventDefault(); setCart([]); setDiscountAmount(0); break;
         case 'F8': e.preventDefault(); setPaymentMethod('CASH'); setShowCheckout(true); break;
         case 'F9': e.preventDefault(); setPaymentMethod('CARD'); setShowCheckout(true); break;
         case 'F10': e.preventDefault(); setPaymentMethod('TRANSFER'); setShowCheckout(true); break;
@@ -226,7 +267,7 @@ export default function POSPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [cart.length]);
+  }, [cart, activeLineId, discountAmount]);
 
   return (
     <div className="flex h-screen flex-col bg-slate-100 font-sans text-slate-900">
@@ -370,6 +411,7 @@ export default function POSPage() {
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">RNC del Cliente</label>
                 <input value={clientRnc} onChange={(e) => setClientRnc(e.target.value)}
+                  ref={clientRncRef}
                   placeholder="9 u 11 dígitos" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400" />
               </div>
             )}
@@ -392,7 +434,9 @@ export default function POSPage() {
                 </thead>
                 <tbody>
                   {cart.map((item) => (
-                    <tr key={item.cartId} className="border-b border-slate-100 hover:bg-slate-50">
+                    <tr key={item.cartId}
+                      onClick={() => setActiveLineId(item.cartId)}
+                      className={`border-b border-slate-100 hover:bg-slate-50 ${activeLineId === item.cartId ? 'bg-indigo-50/60' : ''}`}>
                       <td className="max-w-[120px] truncate px-3 py-2 font-medium text-slate-800">
                         {item.name}
                         {item.isLoose && <span className="ml-1 text-[10px] text-amber-600">DETALLE</span>}
@@ -435,6 +479,11 @@ export default function POSPage() {
               <div className="flex justify-between text-slate-600">
                 <span>Subtotal</span><span className="tabular-nums">RD$ {subtotal.toFixed(2)}</span>
               </div>
+              {discountAmount > 0 && (
+                <div className="flex justify-between text-emerald-600">
+                  <span>Descuento</span><span className="tabular-nums">− RD$ {discountAmount.toFixed(2)}</span>
+                </div>
+              )}
               {applyItbis && (
                 <div className="flex justify-between text-slate-600">
                   <span>ITBIS (18%)</span><span className="tabular-nums">RD$ {itbisAmount.toFixed(2)}</span>
@@ -471,6 +520,41 @@ export default function POSPage() {
           </div>
         </div>
       </div>
+
+      {/* Discount modal (F3) */}
+      {showDiscountModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white shadow-2xl">
+            <div className="border-b border-slate-200 px-6 py-4">
+              <h3 className="text-lg font-bold text-slate-900">F3 — Descuento</h3>
+              <p className="text-sm text-slate-500">Aplica descuento fijo o porcentual al carrito</p>
+            </div>
+            <div className="space-y-4 p-6">
+              <div className="flex gap-2">
+                {(['fixed', 'percent'] as const).map((mode) => (
+                  <button key={mode} type="button"
+                    onClick={() => setDiscountMode(mode)}
+                    className={`flex-1 rounded-lg border py-2 text-sm font-semibold ${
+                      discountMode === mode ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-600'
+                    }`}>
+                    {mode === 'fixed' ? 'RD$ Fijo' : '% Porcentaje'}
+                  </button>
+                ))}
+              </div>
+              <input type="number" step="0.01" min="0" autoFocus value={discountInput}
+                onChange={(e) => setDiscountInput(e.target.value)}
+                placeholder={discountMode === 'fixed' ? 'Ej. 50.00' : 'Ej. 10'}
+                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-xl font-bold tabular-nums outline-none focus:border-indigo-400" />
+              <div className="flex gap-3">
+                <button type="button" onClick={() => { setDiscountAmount(0); setShowDiscountModal(false); }}
+                  className="flex-1 rounded-xl border border-slate-200 py-3 font-medium">Quitar</button>
+                <button type="button" onClick={applyDiscount}
+                  className="flex-1 rounded-xl bg-indigo-600 py-3 font-bold text-white hover:bg-indigo-500">Aplicar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Checkout modal */}
       {showCheckout && (

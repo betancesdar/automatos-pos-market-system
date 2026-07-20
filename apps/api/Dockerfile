@@ -24,12 +24,15 @@ ENV NODE_ENV=production
 
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/package.json ./apps/api/
+COPY --from=builder /app/apps/api/docker-entrypoint.sh ./apps/api/docker-entrypoint.sh
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/database ./packages/database
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
 
+RUN chmod +x ./apps/api/docker-entrypoint.sh
+
 EXPOSE 4000
 ENV PORT=4000
 
-CMD ["node", "apps/api/dist/main.js"]
+ENTRYPOINT ["./apps/api/docker-entrypoint.sh"]

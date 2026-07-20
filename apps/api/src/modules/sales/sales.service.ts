@@ -25,6 +25,7 @@ interface CheckoutData {
   applyItbis?: boolean;
   clientRnc?: string;
   paymentMethod?: PaymentMethod;
+  discountAmount?: number;
 }
 
 @Injectable()
@@ -77,14 +78,17 @@ export class SalesService {
 
       subtotal = parseFloat(subtotal.toFixed(2));
 
+      const discount = Math.min(Math.max(data.discountAmount ?? 0, 0), subtotal);
+      const netSubtotal = parseFloat((subtotal - discount).toFixed(2));
+
       let itbis = 0;
       const shouldApplyItbis = data.applyItbis ?? false;
       if (shouldApplyItbis) {
-        const taxableAmount = subtotal / (1 + ITBIS_RATE);
-        itbis = parseFloat((subtotal - taxableAmount).toFixed(2));
+        const taxableAmount = netSubtotal / (1 + ITBIS_RATE);
+        itbis = parseFloat((netSubtotal - taxableAmount).toFixed(2));
       }
 
-      const total = subtotal;
+      const total = netSubtotal;
       const paymentMethod = data.paymentMethod ?? PaymentMethod.CASH;
 
       if (paymentMethod === PaymentMethod.CASH && data.cashReceived < total) {
