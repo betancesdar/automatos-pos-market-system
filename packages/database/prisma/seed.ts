@@ -87,19 +87,36 @@ async function main() {
       { tenantId: tenant.id, type: NcfType.CONSUMIDOR_FINAL, prefix: 'B02', nextValue: 1 },
       { tenantId: tenant.id, type: NcfType.CREDITO_FISCAL, prefix: 'B01', nextValue: 1 },
       { tenantId: tenant.id, type: NcfType.GUBERNAMENTAL, prefix: 'B15', nextValue: 1 },
+      { tenantId: tenant.id, type: NcfType.REGISTRO_UNICO_INGRESO, prefix: 'B02', nextValue: 1 },
     ],
   })
 
+  const categoryDefs = [
+    { name: 'Bebidas', slug: 'BEBIDAS' },
+    { name: 'Alimentos', slug: 'ALIMENTOS' },
+    { name: 'Limpieza', slug: 'LIMPIEZA' },
+    { name: 'Cuidado Personal', slug: 'CUIDADO_PERSONAL' },
+    { name: 'Otros', slug: 'OTROS' },
+  ]
+  const catMap: Record<string, string> = {}
+  for (const c of categoryDefs) {
+    const cat = await prisma.category.create({ data: { ...c, tenantId: tenant.id } })
+    catMap[c.slug] = cat.id
+  }
+
   const products = [
-    { barcode: '7460111111111', name: 'Refresco Imperio Rojo 500ml', category: 'Bebidas', price: 25, cost: 15, stock: 100 },
-    { barcode: '7460222222222', name: 'Salami Super Especial Induveca', category: 'Embutidos', price: 150, cost: 110, stock: 50 },
-    { barcode: '7460333333333', name: 'Ron Brugal Añejo 700ml', category: 'Licores', price: 550, cost: 400, stock: 20 },
-    { barcode: '7460444444444', name: 'Jugo Rica Naranja 1L', category: 'Bebidas', price: 80, cost: 60, stock: 40 },
-    { barcode: '7460555555555', name: 'Cerveza Presidente Grande', category: 'Bebidas', price: 180, cost: 130, stock: 200 },
+    { barcode: '7460111111111', name: 'Refresco Imperio Rojo 500ml', slug: 'BEBIDAS', price: 25, cost: 15, stock: 100, imageUrl: 'https://images.unsplash.com/photo-1622484214627-4474bfb984ba?w=200&h=200&fit=crop' },
+    { barcode: '7460222222222', name: 'Salami Super Especial Induveca', slug: 'ALIMENTOS', price: 150, cost: 110, stock: 50 },
+    { barcode: '7460333333333', name: 'Ron Brugal Añejo 700ml', slug: 'BEBIDAS', price: 550, cost: 400, stock: 20 },
+    { barcode: '7460444444444', name: 'Jugo Rica Naranja 1L', slug: 'BEBIDAS', price: 80, cost: 60, stock: 40 },
+    { barcode: '7460555555555', name: 'Cerveza Presidente Grande', slug: 'BEBIDAS', price: 180, cost: 130, stock: 200 },
   ]
 
   for (const p of products) {
-    await prisma.product.create({ data: { ...p, tenantId: tenant.id } })
+    const { slug, ...rest } = p
+    await prisma.product.create({
+      data: { ...rest, categoryId: catMap[slug], tenantId: tenant.id },
+    })
   }
 
   console.log('\n🎉  Seed complete!')

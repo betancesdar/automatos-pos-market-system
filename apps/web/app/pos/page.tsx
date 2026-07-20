@@ -1,88 +1,194 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { BarcodeScanner } from '../../components/BarcodeScanner';
 import { ReceiptPrinter } from '../../components/ReceiptPrinter';
 import { QuickAddProductModal } from '../../components/QuickAddProductModal';
 import { useAuth } from '../../lib/auth-context';
 import { apiFetch, LicenseBlockedError } from '../../lib/api';
+import {
+  POS_CATEGORY_TABS,
+  RECEIPT_TYPES,
+  type CartLine,
+  type PosProduct,
+  type ReceiptTypeValue,
+  lineTotal,
+  productEmoji,
+} from '../../lib/pos-types';
 
-interface CartItem {
-  productId: string;
-  name: string;
-  price: number;
-  quantity: number;
+type PaymentMethod = 'CASH' | 'CARD' | 'TRANSFER';
+
+function newCartId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function ProductImage({ product }: { product: PosProduct }) {
+  const [failed, setFailed] = useState(false);
+  const slug = product.category?.slug;
+
+  if (product.imageUrl && !failed) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={product.imageUrl}
+        alt={product.name}
+        className="h-full w-full object-cover"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+
+  return (
+    <div className="flex h-full w-full flex-col items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200 text-slate-400">
+      <span className="text-3xl">{productEmoji(slug)}</span>
+    </div>
+  );
 }
 
 export default function POSPage() {
   const { user, logout, setLicenseBlocked } = useAuth();
   const router = useRouter();
   const tenantId = user?.tenantId ?? '';
+  const searchRef = useRef<HTMLInputElement>(null);
 
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const [products, setProducts] = useState<PosProduct[]>([]);
+  const [cart, setCart] = useState<CartLine[]>([]);
+  const [activeCategory, setActiveCategory] = useState('TODOS');
+  const [search, setSearch] = useState('');
+  const [loadingProducts, setLoadingProducts] = useState(true);
+
   const [modalOpen, setModalOpen] = useState(false);
   const [scannedBarcode, setScannedBarcode] = useState('');
   const [suggestedName, setSuggestedName] = useState('');
-  const [isCheckingOut, setIsCheckingOut] = useState(false);
-  const [cashReceived, setCashReceived] = useState('');
-  const [ncfType, setNcfType] = useState('CONSUMIDOR_FINAL');
+
+  const [receiptType, setReceiptType] = useState<ReceiptTypeValue>('VENTA_RAPIDA');
+  const [applyItbis, setApplyItbis] = useState(false);
   const [clientRnc, setClientRnc] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CASH');
+  const [cashReceived, setCashReceived] = useState('');
+  const [showCheckout, setShowCheckout] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
+  const [editingLineId, setEditingLineId] = useState<string | null>(null);
   const [lastSale, setLastSale] = useState<{ ncf?: string; total: number } | null>(null);
 
-  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const receiptConfig = RECEIPT_TYPES.find((r) => r.value === receiptType)!;
+  const subtotal = cart.reduce((s, i) => s + lineTotal(i), 0);
+  const itbisAmount = applyItbis ? parseFloat((subtotal - subtotal / 1.18).toFixed(2)) : 0;
+  const grandTotal = subtotal;
+
+  const loadProducts = useCallback(async () => {
+    if (!tenantId) return;
+    setLoadingProducts(true);
+    try {
+      const params = new URLSearchParams();
+      if (activeCategory !== 'TODOS') params.set('category', activeCategory);
+      if (search.trim()) params.set('search', search.trim());
+      const qs = params.toString();
+      const data = await apiFetch<PosProduct[]>(
+        `/catalog/products${qs ? `?${qs}` : ''}`,
+        tenantId,
+      );
+      setProducts(data);
+    } catch (err) {
+      if (err instanceof LicenseBlockedError) setLicenseBlocked(err.message);
+    } finally {
+      setLoadingProducts(false);
+    }
+  }, [tenantId, activeCategory, search, setLicenseBlocked]);
+
+  useEffect(() => { loadProducts(); }, [loadProducts]);
+
+  useEffect(() => {
+    const cfg = RECEIPT_TYPES.find((r) => r.value === receiptType)!;
+    setApplyItbis(cfg.applyItbis);
+  }, [receiptType]);
+
+  const addToCart = (product: PosProduct, qty = 1) => {
+    setCart((prev) => {
+      const existing = prev.find((i) => i.productId === product.id && !i.isLoose);
+      if (existing) {
+        return prev.map((i) =>
+          i.cartId === existing.cartId ? { ...i, quantity: i.quantity + qty } : i,
+        );
+      }
+      return [{
+        cartId: newCartId(),
+        productId: product.id,
+        name: product.name,
+        basePrice: product.price,
+        unitPrice: product.price,
+        quantity: qty,
+        isLoose: false,
+      }, ...prev];
+    });
+  };
 
   const handleScan = async (barcode: string) => {
     if (!tenantId) return;
     try {
-      const data = await apiFetch<{ product?: { id: string; name: string; price: number }; suggestion?: { name: string } }>(
+      const data = await apiFetch<{ product?: PosProduct; suggestion?: { name: string } }>(
         `/catalog/scan/${barcode}`, tenantId,
       );
-      if (data.product) {
-        addToCart(data.product);
-      } else {
+      if (data.product) addToCart(data.product);
+      else {
         setScannedBarcode(barcode);
         setSuggestedName(data.suggestion?.name || '');
         setModalOpen(true);
       }
     } catch (err) {
-      console.error('Scan error', err);
+      if (err instanceof LicenseBlockedError) setLicenseBlocked(err.message);
     }
   };
 
-  const addToCart = (product: { id: string; name: string; price: number }) => {
-    setCart((prev) => {
-      const existing = prev.find((i) => i.productId === product.id);
-      if (existing) {
-        return prev.map((i) => i.productId === product.id ? { ...i, quantity: i.quantity + 1 } : i);
+  const removeFromCart = (cartId: string) => setCart((prev) => prev.filter((i) => i.cartId !== cartId));
+
+  const updateLine = (cartId: string, patch: Partial<Pick<CartLine, 'quantity' | 'unitPrice' | 'isLoose'>>) => {
+    setCart((prev) => prev.map((i) => {
+      if (i.cartId !== cartId) return i;
+      const updated = { ...i, ...patch };
+      if (patch.unitPrice !== undefined && patch.unitPrice !== i.basePrice) {
+        updated.isLoose = true;
       }
-      return [{ productId: product.id, name: product.name, price: product.price, quantity: 1 }, ...prev];
-    });
+      return updated;
+    }));
   };
 
-  const handleSaveNewProduct = async (productData: Record<string, unknown>) => {
-    const newProduct = await apiFetch<{ id: string; name: string; price: number }>(
-      '/catalog/product', tenantId,
-      { method: 'POST', body: JSON.stringify(productData) },
-    );
-    addToCart(newProduct);
-    setModalOpen(false);
-  };
-
-  const handleCheckout = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const finalizeSale = async () => {
     setCheckoutError('');
+    if (cart.length === 0) return;
+
+    const received = paymentMethod === 'CASH'
+      ? parseFloat(cashReceived) || 0
+      : grandTotal;
+
+    if (paymentMethod === 'CASH' && received < grandTotal) {
+      setCheckoutError('El efectivo recibido es menor al total');
+      return;
+    }
+
+    if (receiptConfig.needsRnc && !clientRnc.trim()) {
+      setCheckoutError('RNC del cliente es obligatorio para Crédito Fiscal');
+      return;
+    }
+
     try {
       const data = await apiFetch<{ receiptRaw?: string; sale: { ncf?: string; total: number } }>(
         '/sales/checkout', tenantId,
         {
           method: 'POST',
           body: JSON.stringify({
-            items: cart.map((i) => ({ productId: i.productId, quantity: i.quantity })),
-            cashReceived: parseFloat(cashReceived),
-            ncfType,
-            clientRnc: ncfType === 'CREDITO_FISCAL' ? clientRnc : undefined,
+            items: cart.map((i) => ({
+              productId: i.productId,
+              quantity: i.quantity,
+              unitPrice: i.unitPrice,
+              isLoose: i.isLoose,
+            })),
+            cashReceived: received,
+            ncfType: receiptType,
+            applyItbis,
+            clientRnc: receiptConfig.needsRnc ? clientRnc : undefined,
+            paymentMethod,
           }),
         },
       );
@@ -93,168 +199,320 @@ export default function POSPage() {
 
       setLastSale({ ncf: data.sale.ncf, total: data.sale.total });
       setCart([]);
-      setIsCheckingOut(false);
+      setShowCheckout(false);
       setCashReceived('');
       setClientRnc('');
+      loadProducts();
     } catch (err) {
-      if (err instanceof LicenseBlockedError) {
-        setLicenseBlocked(err.message);
-      } else {
-        setCheckoutError(err instanceof Error ? err.message : 'Error en facturación');
-      }
+      if (err instanceof LicenseBlockedError) setLicenseBlocked(err.message);
+      else setCheckoutError(err instanceof Error ? err.message : 'Error en facturación');
     }
   };
 
   useEffect(() => {
-    const handleGlobalKeys = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setCart([]);
-        setIsCheckingOut(false);
-        setModalOpen(false);
-      } else if (e.code === 'Space' && cart.length > 0 && !isCheckingOut && !modalOpen) {
-        e.preventDefault();
-        setIsCheckingOut(true);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        if (e.key === 'F12') { e.preventDefault(); if (cart.length) setShowCheckout(true); }
+        return;
+      }
+      switch (e.key) {
+        case 'F1': e.preventDefault(); searchRef.current?.focus(); break;
+        case 'F5': e.preventDefault(); setCart([]); break;
+        case 'F8': e.preventDefault(); setPaymentMethod('CASH'); setShowCheckout(true); break;
+        case 'F9': e.preventDefault(); setPaymentMethod('CARD'); setShowCheckout(true); break;
+        case 'F10': e.preventDefault(); setPaymentMethod('TRANSFER'); setShowCheckout(true); break;
+        case 'F12': e.preventDefault(); if (cart.length) setShowCheckout(true); break;
       }
     };
-    window.addEventListener('keydown', handleGlobalKeys);
-    return () => window.removeEventListener('keydown', handleGlobalKeys);
-  }, [cart, isCheckingOut, modalOpen]);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [cart.length]);
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-slate-950 font-sans">
+    <div className="flex h-screen flex-col bg-slate-100 font-sans text-slate-900">
       <BarcodeScanner onScan={handleScan} />
       <ReceiptPrinter />
+      <QuickAddProductModal isOpen={modalOpen} barcode={scannedBarcode} suggestedName={suggestedName}
+        onClose={() => setModalOpen(false)} onSave={async (d) => {
+          const p = await apiFetch<PosProduct>('/catalog/product', tenantId, { method: 'POST', body: JSON.stringify(d) });
+          addToCart(p); setModalOpen(false); loadProducts();
+        }} />
 
-      <QuickAddProductModal
-        isOpen={modalOpen}
-        barcode={scannedBarcode}
-        suggestedName={suggestedName}
-        onClose={() => setModalOpen(false)}
-        onSave={handleSaveNewProduct}
-      />
-
-      <header className="flex items-center justify-between border-b border-slate-800 bg-slate-900 p-4 shadow-md">
+      {/* Top bar */}
+      <header className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-5 py-3 shadow-sm">
         <div>
-          <h1 className="text-2xl font-black tracking-tight text-white">MiniMarket OS</h1>
-          <p className="text-sm font-medium text-slate-400">
-            Terminal POS · {user?.name}
-          </p>
+          <h1 className="text-lg font-bold text-slate-900">
+            <span className="text-indigo-600">Mini</span>Market POS
+          </h1>
+          <p className="text-xs text-slate-500">{user?.name} · Terminal de ventas</p>
         </div>
-        <div className="flex items-center gap-4">
-          {lastSale && (
-            <div className="text-right text-sm text-emerald-400">
-              Última venta: RD$ {lastSale.total.toFixed(2)}
-              {lastSale.ncf && <span className="block font-mono text-xs">{lastSale.ncf}</span>}
-            </div>
-          )}
-          <div className="text-right">
-            <div className="mb-1 text-sm font-bold uppercase tracking-wider text-slate-400">Total RD$</div>
-            <div className="text-5xl font-black tabular-nums tracking-tighter text-emerald-400">
-              {total.toFixed(2)}
-            </div>
+        {lastSale && (
+          <div className="rounded-lg bg-emerald-50 px-3 py-1.5 text-xs text-emerald-700">
+            Última venta RD$ {lastSale.total.toFixed(2)}
+            {lastSale.ncf && <span className="ml-2 font-mono">{lastSale.ncf}</span>}
           </div>
+        )}
+        <div className="flex gap-2">
           {user?.role === 'ADMIN' && (
-            <button onClick={() => router.push('/admin')}
-              className="rounded-lg bg-slate-800 px-3 py-2 text-sm font-medium text-slate-300 hover:bg-slate-700">
-              Admin
-            </button>
+            <button onClick={() => router.push('/admin')} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm hover:bg-slate-50">Admin</button>
           )}
-          <button onClick={logout}
-            className="rounded-lg bg-slate-800 px-3 py-2 text-sm font-medium text-slate-400 hover:bg-slate-700">
-            Salir
-          </button>
+          <button onClick={logout} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-50">Salir</button>
         </div>
       </header>
 
-      <main className="flex flex-1 overflow-hidden">
-        <div className="flex w-2/3 flex-col border-r border-slate-800">
-          <div className="flex-1 space-y-2 overflow-auto p-4">
-            {cart.length === 0 ? (
-              <div className="flex h-full flex-col items-center justify-center text-slate-500">
-                <p className="text-xl font-medium">Escanea un código para empezar</p>
-              </div>
+      <div className="flex min-h-0 flex-1">
+        {/* LEFT — Product workspace */}
+        <div className="flex min-w-0 flex-1 flex-col border-r border-slate-200 bg-slate-50">
+          {/* Search */}
+          <div className="border-b border-slate-200 bg-white p-4">
+            <input
+              ref={searchRef}
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar producto por código, nombre o código de barra…"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none ring-indigo-500 focus:border-indigo-400 focus:ring-2"
+            />
+          </div>
+
+          {/* Category tabs */}
+          <div className="flex gap-1 overflow-x-auto border-b border-slate-200 bg-white px-4 py-2">
+            {POS_CATEGORY_TABS.map((tab) => (
+              <button
+                key={tab.slug}
+                onClick={() => setActiveCategory(tab.slug)}
+                className={`shrink-0 rounded-lg px-4 py-2 text-xs font-bold tracking-wide transition-colors ${
+                  activeCategory === tab.slug
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Product grid */}
+          <div className="flex-1 overflow-y-auto p-4">
+            {loadingProducts ? (
+              <p className="py-20 text-center text-slate-400">Cargando productos…</p>
+            ) : products.length === 0 ? (
+              <p className="py-20 text-center text-slate-400">No hay productos en esta categoría</p>
             ) : (
-              cart.map((item, idx) => (
-                <div key={idx} className="flex items-center justify-between rounded-xl border border-slate-700/50 bg-slate-800/50 p-4">
-                  <div className="flex-1">
-                    <h3 className="text-xl font-bold text-slate-100">{item.name}</h3>
-                    <p className="font-medium text-slate-400">RD$ {item.price.toFixed(2)} c/u</p>
-                  </div>
-                  <div className="flex items-center gap-6">
-                    <div className="text-2xl font-black tabular-nums text-white">x{item.quantity}</div>
-                    <div className="w-32 text-right text-2xl font-black tabular-nums text-emerald-400">
-                      {(item.price * item.quantity).toFixed(2)}
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                {products.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => addToCart(p)}
+                    disabled={p.stock <= 0}
+                    className="group flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-sm transition-all hover:border-indigo-300 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <div className="aspect-square w-full overflow-hidden">
+                      <ProductImage product={p} />
                     </div>
-                  </div>
-                </div>
-              ))
+                    <div className="flex flex-1 flex-col p-3">
+                      <p className="line-clamp-2 text-sm font-semibold leading-snug text-slate-800 group-hover:text-indigo-700">
+                        {p.name}
+                      </p>
+                      <p className="mt-2 text-lg font-bold tabular-nums text-indigo-600">
+                        RD$ {p.price.toFixed(2)}
+                      </p>
+                      <p className="mt-0.5 text-xs text-slate-400">Stock: {p.stock}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
             )}
           </div>
-          <div className="border-t border-slate-800 bg-slate-900 p-4">
-            <button onClick={() => setIsCheckingOut(true)} disabled={cart.length === 0}
-              className="w-full rounded-xl bg-emerald-500 py-5 text-2xl font-black uppercase tracking-widest text-slate-950 shadow-[0_0_40px_rgba(16,185,129,0.3)] transition-all hover:bg-emerald-400 disabled:bg-slate-700 disabled:opacity-50">
-              Cobrar (Espacio)
-            </button>
+
+          {/* Shortcut bar */}
+          <div className="flex flex-wrap gap-2 border-t border-slate-200 bg-white px-4 py-2">
+            {[
+              ['F1', 'Buscar'], ['F2', 'Cliente'], ['F3', 'Descuento'],
+              ['F4', 'Cantidad'], ['F5', 'Borrar'],
+            ].map(([key, label]) => (
+              <span key={key} className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs text-slate-500">
+                <kbd className="font-bold text-slate-700">{key}</kbd> — {label}
+              </span>
+            ))}
           </div>
         </div>
 
-        {isCheckingOut && (
-          <div className="absolute inset-0 z-40 flex items-center justify-center bg-slate-950/95 p-8 backdrop-blur-sm">
-            <div className="flex w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-slate-700 bg-slate-900 shadow-2xl">
-              <div className="flex items-center justify-between bg-emerald-500 p-6">
-                <h2 className="text-3xl font-black uppercase tracking-tight text-slate-950">Facturación</h2>
-                <div className="text-4xl font-black tabular-nums text-slate-950">RD$ {total.toFixed(2)}</div>
+        {/* RIGHT — Cart sidebar */}
+        <div className="flex w-[420px] shrink-0 flex-col bg-white shadow-xl">
+          <div className="border-b border-slate-200 px-4 py-3">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700">Carrito de Venta</h2>
+            <p className="text-xs text-slate-400">{cart.length} artículo(s)</p>
+          </div>
+
+          {/* Fiscal options */}
+          <div className="space-y-3 border-b border-slate-200 px-4 py-3">
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-600">Tipo de Comprobante / NCF</label>
+              <select
+                value={receiptType}
+                onChange={(e) => setReceiptType(e.target.value as ReceiptTypeValue)}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400"
+              >
+                {RECEIPT_TYPES.map((r) => (
+                  <option key={r.value} value={r.value}>{r.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" checked={applyItbis} onChange={(e) => setApplyItbis(e.target.checked)}
+                className="rounded border-slate-300 text-indigo-600" />
+              Aplicar ITBIS (18%)
+            </label>
+
+            {receiptConfig.needsRnc && (
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">RNC del Cliente</label>
+                <input value={clientRnc} onChange={(e) => setClientRnc(e.target.value)}
+                  placeholder="9 u 11 dígitos" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400" />
               </div>
-              <form onSubmit={handleCheckout} className="flex flex-1 flex-col space-y-6 p-8">
-                {checkoutError && (
-                  <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-red-400">{checkoutError}</div>
-                )}
-                <div>
-                  <label className="mb-2 block text-sm font-bold uppercase tracking-wider text-slate-400">Tipo NCF</label>
-                  <select value={ncfType} onChange={(e) => setNcfType(e.target.value)}
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-4 text-xl font-bold text-white outline-none focus:ring-2 focus:ring-emerald-500">
-                    <option value="CONSUMIDOR_FINAL">Consumidor Final (B02)</option>
-                    <option value="CREDITO_FISCAL">Crédito Fiscal (B01)</option>
-                    <option value="GUBERNAMENTAL">Gubernamental (B15)</option>
-                  </select>
+            )}
+          </div>
+
+          {/* Cart table */}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {cart.length === 0 ? (
+              <p className="py-16 text-center text-sm text-slate-400">Agrega productos desde la cuadrícula</p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-slate-50 text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Producto</th>
+                    <th className="px-2 py-2 text-right">Cant.</th>
+                    <th className="px-2 py-2 text-right">Precio</th>
+                    <th className="px-2 py-2 text-right">Total</th>
+                    <th className="px-2 py-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {cart.map((item) => (
+                    <tr key={item.cartId} className="border-b border-slate-100 hover:bg-slate-50">
+                      <td className="max-w-[120px] truncate px-3 py-2 font-medium text-slate-800">
+                        {item.name}
+                        {item.isLoose && <span className="ml-1 text-[10px] text-amber-600">DETALLE</span>}
+                      </td>
+                      <td className="px-2 py-2 text-right">
+                        {editingLineId === item.cartId ? (
+                          <input type="number" step="0.01" min="0.01" value={item.quantity}
+                            onChange={(e) => updateLine(item.cartId, { quantity: parseFloat(e.target.value) || 0.01 })}
+                            className="w-16 rounded border px-1 py-0.5 text-right text-xs" autoFocus
+                            onBlur={() => setEditingLineId(null)} />
+                        ) : (
+                          <button onClick={() => setEditingLineId(item.cartId)} className="tabular-nums hover:text-indigo-600">
+                            {item.quantity % 1 === 0 ? item.quantity : item.quantity.toFixed(2)}
+                          </button>
+                        )}
+                      </td>
+                      <td className="px-2 py-2 text-right">
+                        <input type="number" step="0.01" min="0.01" value={item.unitPrice}
+                          onChange={(e) => updateLine(item.cartId, { unitPrice: parseFloat(e.target.value) || 0.01 })}
+                          className="w-20 rounded border border-transparent px-1 py-0.5 text-right text-xs hover:border-slate-200 focus:border-indigo-400" />
+                      </td>
+                      <td className="px-2 py-2 text-right font-semibold tabular-nums text-indigo-600">
+                        {lineTotal(item).toFixed(2)}
+                      </td>
+                      <td className="px-2 py-2">
+                        <button onClick={() => removeFromCart(item.cartId)} className="text-red-400 hover:text-red-600" title="Eliminar">
+                          ✕
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* Totals & payment */}
+          <div className="border-t border-slate-200 bg-slate-50 p-4">
+            <div className="mb-3 space-y-1 text-sm">
+              <div className="flex justify-between text-slate-600">
+                <span>Subtotal</span><span className="tabular-nums">RD$ {subtotal.toFixed(2)}</span>
+              </div>
+              {applyItbis && (
+                <div className="flex justify-between text-slate-600">
+                  <span>ITBIS (18%)</span><span className="tabular-nums">RD$ {itbisAmount.toFixed(2)}</span>
                 </div>
-                {ncfType === 'CREDITO_FISCAL' && (
-                  <div>
-                    <label className="mb-2 block text-sm font-bold uppercase tracking-wider text-slate-400">RNC Cliente</label>
-                    <input type="text" value={clientRnc} onChange={(e) => setClientRnc(e.target.value)}
-                      placeholder="9 u 11 dígitos" required
-                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-4 text-xl font-bold text-white outline-none focus:ring-2 focus:ring-emerald-500" />
-                  </div>
-                )}
+              )}
+              <div className="flex justify-between border-t border-slate-200 pt-2 text-lg font-bold text-slate-900">
+                <span>TOTAL</span><span className="tabular-nums text-indigo-600">RD$ {grandTotal.toFixed(2)}</span>
+              </div>
+            </div>
+
+            <div className="mb-3 grid grid-cols-3 gap-2">
+              {([
+                ['CASH', 'F8', 'Efectivo'],
+                ['CARD', 'F9', 'Tarjeta'],
+                ['TRANSFER', 'F10', 'Transfer.'],
+              ] as const).map(([method, key, label]) => (
+                <button key={method}
+                  onClick={() => { setPaymentMethod(method); setShowCheckout(true); }}
+                  className={`rounded-lg border py-2 text-xs font-semibold transition-colors ${
+                    paymentMethod === method ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
+                  }`}>
+                  <span className="block font-bold">{key}</span>{label}
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={() => setShowCheckout(true)}
+              disabled={cart.length === 0}
+              className="w-full rounded-xl bg-emerald-600 py-4 text-base font-bold text-white shadow-lg transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              F12 — FINALIZAR VENTA
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Checkout modal */}
+      {showCheckout && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
+            <div className="rounded-t-2xl bg-emerald-600 px-6 py-4">
+              <h3 className="text-xl font-bold text-white">Confirmar Venta</h3>
+              <p className="text-3xl font-black tabular-nums text-white">RD$ {grandTotal.toFixed(2)}</p>
+            </div>
+            <div className="space-y-4 p-6">
+              {checkoutError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{checkoutError}</div>
+              )}
+              <p className="text-sm text-slate-600">
+                Método: <strong>{paymentMethod === 'CASH' ? 'Efectivo' : paymentMethod === 'CARD' ? 'Tarjeta' : 'Transferencia'}</strong>
+                {' · '}{receiptConfig.label}
+              </p>
+              {paymentMethod === 'CASH' && (
                 <div>
-                  <label className="mb-2 block text-sm font-bold uppercase tracking-wider text-slate-400">Efectivo Recibido</label>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Efectivo recibido</label>
                   <input type="number" step="0.01" autoFocus value={cashReceived}
-                    onChange={(e) => setCashReceived(e.target.value)} required
-                    className="w-full rounded-xl border-2 border-emerald-500/50 bg-slate-950 px-4 py-6 text-4xl font-black tabular-nums text-white outline-none focus:ring-4 focus:ring-emerald-500" />
+                    onChange={(e) => setCashReceived(e.target.value)}
+                    className="w-full rounded-xl border-2 border-emerald-300 px-4 py-3 text-2xl font-bold tabular-nums outline-none focus:border-emerald-500" />
+                  {parseFloat(cashReceived) > grandTotal && (
+                    <p className="mt-2 text-emerald-600 font-semibold">
+                      Devuelta: RD$ {(parseFloat(cashReceived) - grandTotal).toFixed(2)}
+                    </p>
+                  )}
                 </div>
-                {parseFloat(cashReceived) > total && (
-                  <div className="flex items-center justify-between rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-4">
-                    <span className="text-lg font-bold text-emerald-400">Devuelta:</span>
-                    <span className="text-3xl font-black tabular-nums text-emerald-400">
-                      RD$ {(parseFloat(cashReceived) - total).toFixed(2)}
-                    </span>
-                  </div>
-                )}
-                <div className="mt-auto flex gap-4 pt-6">
-                  <button type="button" onClick={() => setIsCheckingOut(false)}
-                    className="w-1/3 rounded-xl bg-slate-800 py-4 text-xl font-bold text-white hover:bg-slate-700">
-                    Cancelar
-                  </button>
-                  <button type="submit"
-                    className="flex-1 rounded-xl bg-emerald-500 py-4 text-2xl font-black uppercase text-slate-950 shadow-lg hover:bg-emerald-400">
-                    Confirmar Pago
-                  </button>
-                </div>
-              </form>
+              )}
+              <div className="flex gap-3">
+                <button onClick={() => setShowCheckout(false)} className="flex-1 rounded-xl border border-slate-200 py-3 font-medium">
+                  Cancelar
+                </button>
+                <button onClick={finalizeSale} className="flex-1 rounded-xl bg-emerald-600 py-3 font-bold text-white hover:bg-emerald-500">
+                  Confirmar
+                </button>
+              </div>
             </div>
           </div>
-        )}
-      </main>
+        </div>
+      )}
     </div>
   );
 }

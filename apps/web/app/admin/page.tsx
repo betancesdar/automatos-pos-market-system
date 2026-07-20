@@ -27,7 +27,9 @@ interface FinancialSummary {
 }
 
 interface Product {
-  id: string; name: string; barcode: string | null; price: number; cost: number; stock: number; category: string | null;
+  id: string; name: string; barcode: string | null; price: number; cost: number; stock: number;
+  imageUrl: string | null;
+  category?: { id: string; name: string; slug: string } | null;
 }
 
 interface PurchaseSuggestion {
@@ -142,7 +144,15 @@ export default function AdminDashboard() {
   const handleAddProduct = async (data: ProductFormData) => {
     await apiFetch('/catalog/product', tenantId, {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: JSON.stringify({
+        barcode: data.barcode || undefined,
+        name: data.name,
+        price: data.price,
+        cost: data.cost,
+        stock: data.stock,
+        categoryId: data.categoryId,
+        imageUrl: data.imageUrl || undefined,
+      }),
     });
     await fetchAll();
   };
@@ -174,7 +184,7 @@ export default function AdminDashboard() {
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
       <ReceiptPrinter />
 
-      <AddProductModal isOpen={showAddProduct} onClose={() => setShowAddProduct(false)} onSave={handleAddProduct} />
+      <AddProductModal isOpen={showAddProduct} tenantId={tenantId} onClose={() => setShowAddProduct(false)} onSave={handleAddProduct} />
       <CashCloseModal
         isOpen={showCashClose}
         tenantId={tenantId}
@@ -358,7 +368,7 @@ export default function AdminDashboard() {
                       <td className="px-4 py-3 text-right">
                         <span className={p.stock <= 10 ? 'font-bold text-red-600' : 'text-slate-700'}>{p.stock}</span>
                       </td>
-                      <td className="px-4 py-3 text-slate-500">{p.category || '—'}</td>
+                      <td className="px-4 py-3 text-slate-500">{p.category?.name || '—'}</td>
                     </tr>
                   ))}
                   {products.length === 0 && (

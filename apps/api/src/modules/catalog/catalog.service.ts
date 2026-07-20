@@ -3,31 +3,31 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import { PrismaService } from '../../prisma/prisma.service';
 
+const DEFAULT_CATEGORIES = [
+  { name: 'Bebidas', slug: 'BEBIDAS' },
+  { name: 'Alimentos', slug: 'ALIMENTOS' },
+  { name: 'Limpieza', slug: 'LIMPIEZA' },
+  { name: 'Cuidado Personal', slug: 'CUIDADO_PERSONAL' },
+  { name: 'Otros', slug: 'OTROS' },
+];
+
 const COMMON_DOMINICAN_PRODUCTS = [
-  { barcode: '7460111111111', name: 'Refresco Imperio Rojo 500ml', category: 'Bebidas' },
-  { barcode: '7460222222222', name: 'Salami Super Especial Induveca', category: 'Embutidos' },
-  { barcode: '7460333333333', name: 'Ron Brugal Añejo 700ml', category: 'Licores' },
-  { barcode: '7460444444444', name: 'Jugo Rica Naranja 1L', category: 'Bebidas' },
-  { barcode: '7460555555555', name: 'Cerveza Presidente Grande', category: 'Bebidas' },
-  { barcode: '7460666666666', name: 'Queso Sosua Geo', category: 'Lácteos' },
-  { barcode: '7460777777777', name: 'Pan Integral Pepin', category: 'Panadería' },
+  { barcode: '7460111111111', name: 'Refresco Imperio Rojo 500ml', category: 'BEBIDAS' },
+  { barcode: '7460222222222', name: 'Salami Super Especial Induveca', category: 'ALIMENTOS' },
+  { barcode: '7460333333333', name: 'Ron Brugal Añejo 700ml', category: 'BEBIDAS' },
+  { barcode: '7460444444444', name: 'Jugo Rica Naranja 1L', category: 'BEBIDAS' },
+  { barcode: '7460555555555', name: 'Cerveza Presidente Grande', category: 'BEBIDAS' },
 ];
 
 function levenshteinDistance(s1: string, s2: string): number {
   const len1 = s1.length, len2 = s2.length;
   const matrix = Array.from({ length: len1 + 1 }, () => new Array(len2 + 1).fill(0));
-
   for (let i = 0; i <= len1; i++) matrix[i][0] = i;
   for (let j = 0; j <= len2; j++) matrix[0][j] = j;
-
   for (let i = 1; i <= len1; i++) {
     for (let j = 1; j <= len2; j++) {
       const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
-      matrix[i][j] = Math.min(
-        matrix[i - 1][j] + 1,
-        matrix[i][j - 1] + 1,
-        matrix[i - 1][j - 1] + cost
-      );
+      matrix[i][j] = Math.min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j - 1] + cost);
     }
   }
   return matrix[len1][len2];
@@ -40,47 +40,48 @@ export class CatalogService {
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
   ) {}
 
+  async ensureDefaultCategories(tenantId: string) {
+    for (const cat of DEFAULT_CATEGORIES) {
+      await this.prisma.category.upsert({
+        where: { slug_tenantId: { slug: cat.slug, tenantId } },
+        create: { ...cat, tenantId },
+        update: {},
+      });
+    }
+  }
+
+  async listCategories(tenantId: string) {
+    await this.ensureDefaultCategories(tenantId);
+    return this.prisma.category.findMany({
+      where: { tenantId },
+      orderBy: { name: 'asc' },
+      include: { _count: { select: { products: true } } },
+    });
+  }
+
   async getProductByBarcode(tenantId: string, barcode: string) {
     const cacheKey = `product:${tenantId}:${barcode}`;
     const cached = await this.cacheManager.get(cacheKey);
-    if (cached) {
-      return { source: 'cache', product: cached };
-    }
+    if (cached) return { source: 'cache', product: cached };
 
     const product = await this.prisma.product.findUnique({
-      where: {
-        barcode_tenantId: {
-          barcode,
-          tenantId,
-        },
-      },
+      where: { barcode_tenantId: { barcode, tenantId } },
+      include: { category: true },
     });
 
     if (product) {
-      await this.cacheManager.set(cacheKey, product, 300000); // 5 mins
+      await this.cacheManager.set(cacheKey, product, 300000);
       return { source: 'database', product };
     }
 
-    // Not found - run Levenshtein suggestion
     let bestMatch: (typeof COMMON_DOMINICAN_PRODUCTS)[number] | null = null;
     let minDistance = Infinity;
-
     for (const p of COMMON_DOMINICAN_PRODUCTS) {
       const distance = levenshteinDistance(barcode, p.barcode);
-      if (distance < minDistance) {
-        minDistance = distance;
-        bestMatch = p;
-      }
+      if (distance < minDistance) { minDistance = distance; bestMatch = p; }
     }
 
-    // If it's somewhat close (e.g., same manufacturer prefix)
-    const suggestion = minDistance <= 5 ? bestMatch : null;
-
-    return {
-      source: 'suggestion',
-      product: null,
-      suggestion,
-    };
+    return { source: 'suggestion', product: null, suggestion: minDistance <= 5 ? bestMatch : null };
   }
 
   async addProduct(tenantId: string, data: {
@@ -89,12 +90,11 @@ export class CatalogService {
     price: number;
     cost?: number;
     stock?: number;
-    category?: string;
+    categoryId?: string;
+    imageUrl?: string;
   }) {
     if (!data.name?.trim()) throw new BadRequestException('Product name is required');
     if (data.price == null || data.price < 0) throw new BadRequestException('Valid price is required');
-    if (data.cost != null && data.cost < 0) throw new BadRequestException('Cost cannot be negative');
-    if (data.stock != null && data.stock < 0) throw new BadRequestException('Stock cannot be negative');
 
     const product = await this.prisma.product.create({
       data: {
@@ -103,21 +103,36 @@ export class CatalogService {
         price: data.price,
         cost: data.cost ?? 0,
         stock: data.stock ?? 0,
-        category: data.category?.trim() || null,
+        categoryId: data.categoryId || null,
+        imageUrl: data.imageUrl?.trim() || null,
         tenantId,
       },
+      include: { category: true },
     });
 
     if (product.barcode) {
       await this.cacheManager.set(`product:${tenantId}:${product.barcode}`, product, 300000);
     }
-
     return product;
   }
 
-  async listProducts(tenantId: string) {
+  async listProducts(tenantId: string, categorySlug?: string, search?: string) {
+    await this.ensureDefaultCategories(tenantId);
+
+    const where: Record<string, unknown> = { tenantId };
+    if (categorySlug && categorySlug !== 'TODOS') {
+      where.category = { slug: categorySlug };
+    }
+    if (search?.trim()) {
+      where.OR = [
+        { name: { contains: search.trim(), mode: 'insensitive' } },
+        { barcode: { contains: search.trim() } },
+      ];
+    }
+
     return this.prisma.product.findMany({
-      where: { tenantId },
+      where,
+      include: { category: true },
       orderBy: { name: 'asc' },
     });
   }
@@ -128,7 +143,8 @@ export class CatalogService {
     price: number;
     cost: number;
     stock: number;
-    category: string;
+    categoryId: string;
+    imageUrl: string;
   }>) {
     const product = await this.prisma.product.findFirst({ where: { id: productId, tenantId } });
     if (!product) throw new NotFoundException('Product not found');
@@ -141,8 +157,10 @@ export class CatalogService {
         ...(data.price !== undefined && { price: data.price }),
         ...(data.cost !== undefined && { cost: data.cost }),
         ...(data.stock !== undefined && { stock: data.stock }),
-        ...(data.category !== undefined && { category: data.category?.trim() || null }),
+        ...(data.categoryId !== undefined && { categoryId: data.categoryId || null }),
+        ...(data.imageUrl !== undefined && { imageUrl: data.imageUrl?.trim() || null }),
       },
+      include: { category: true },
     });
 
     if (updated.barcode) {

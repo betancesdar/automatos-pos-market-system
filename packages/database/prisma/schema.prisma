@@ -9,7 +9,6 @@ datasource db {
   provider = "postgresql"
 }
 
-// El Negocio (Colmado o Minimarket) — Tenant SaaS
 model Tenant {
   id        String   @id @default(uuid())
   name      String
@@ -23,13 +22,13 @@ model Tenant {
   updatedAt DateTime @updatedAt
 
   users          User[]
+  categories     Category[]
   products       Product[]
   sales          Sale[]
   ncfSequences   NCFSequence[]
   cashDrawerLogs CashDrawerLog[]
 }
 
-// Usuarios (Super Admin, Administradores de colmado, Cajeros)
 model User {
   id        String   @id @default(uuid())
   name      String
@@ -47,25 +46,37 @@ enum Role {
   CASHIER
 }
 
-// Inventario
-model Product {
-  id        String     @id @default(uuid())
-  barcode   String?
+model Category {
+  id        String    @id @default(uuid())
   name      String
-  price     Float
-  cost      Float
-  stock     Int        @default(0)
-  category  String?
+  slug      String
   tenantId  String
-  tenant    Tenant     @relation(fields: [tenantId], references: [id])
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  saleItems SaleItem[]
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  products  Product[]
+  createdAt DateTime  @default(now())
+
+  @@unique([slug, tenantId])
+}
+
+model Product {
+  id         String     @id @default(uuid())
+  barcode    String?
+  name       String
+  price      Float
+  cost       Float
+  stock      Int        @default(0)
+  imageUrl   String?
+  categoryId String?
+  category   Category?  @relation(fields: [categoryId], references: [id])
+  tenantId   String
+  tenant     Tenant     @relation(fields: [tenantId], references: [id])
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  saleItems  SaleItem[]
 
   @@unique([barcode, tenantId])
 }
 
-// Secuencias de NCF
 model NCFSequence {
   id        String   @id @default(uuid())
   tenantId  String
@@ -79,20 +90,22 @@ model NCFSequence {
   @@unique([tenantId, type])
 }
 
-// Ventas y Facturación (Adaptado a RD)
 model Sale {
-  id           String     @id @default(uuid())
-  total        Float
-  cashReceived Float?
-  changeDue    Float?
-  ncf          String?
-  ncfType      NcfType    @default(CONSUMIDOR_FINAL)
-  clientRnc    String?
-  itbis        Float      @default(0)
-  tenantId     String
-  tenant       Tenant     @relation(fields: [tenantId], references: [id])
-  createdAt    DateTime   @default(now())
-  items        SaleItem[]
+  id            String        @id @default(uuid())
+  total         Float
+  subtotal      Float         @default(0)
+  cashReceived  Float?
+  changeDue     Float?
+  ncf           String?
+  ncfType       NcfType       @default(VENTA_RAPIDA)
+  clientRnc     String?
+  itbis         Float         @default(0)
+  applyItbis    Boolean       @default(false)
+  paymentMethod PaymentMethod @default(CASH)
+  tenantId      String
+  tenant        Tenant        @relation(fields: [tenantId], references: [id])
+  createdAt     DateTime      @default(now())
+  items         SaleItem[]
 }
 
 model SaleItem {
@@ -101,12 +114,12 @@ model SaleItem {
   sale      Sale    @relation(fields: [saleId], references: [id])
   productId String
   product   Product @relation(fields: [productId], references: [id])
-  quantity  Int
+  quantity  Float
   price     Float
   cost      Float
+  isLoose   Boolean @default(false)
 }
 
-// Cierre de Caja (Cash Drawer Audit)
 model CashDrawerLog {
   id           String   @id @default(uuid())
   tenantId     String
@@ -120,7 +133,16 @@ model CashDrawerLog {
 }
 
 enum NcfType {
+  SIN_NCF
+  VENTA_RAPIDA
   CONSUMIDOR_FINAL
   CREDITO_FISCAL
+  REGISTRO_UNICO_INGRESO
   GUBERNAMENTAL
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  TRANSFER
 }
