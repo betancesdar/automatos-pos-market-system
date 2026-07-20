@@ -4,14 +4,18 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
+import { useAuth } from '../../lib/auth-context';
+import { apiFetch, downloadFile, LicenseBlockedError } from '../../lib/api';
+import { AddProductModal, type ProductFormData } from '../../components/admin/AddProductModal';
+import { TenantSettingsPanel } from '../../components/admin/TenantSettingsPanel';
+import { EmployeesPanel } from '../../components/admin/EmployeesPanel';
+import { CashCloseModal } from '../../components/admin/CashCloseModal';
+import { ReceiptPrinter } from '../../components/ReceiptPrinter';
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-// Replace with the real seeded tenantId after running seed
-const TENANT_ID = process.env.NEXT_PUBLIC_TENANT_ID || 'REPLACE_WITH_SEEDED_TENANT_ID';
 
-// ──────────────────────────────────────────────────────────────────────────────
-// TYPES
-// ──────────────────────────────────────────────────────────────────────────────
+type Tab = 'overview' | 'inventory' | 'fiscal' | 'settings' | 'employees';
+
 interface FinancialSummary {
   totalSales: number;
   grossRevenue: number;
@@ -19,360 +23,388 @@ interface FinancialSummary {
   netProfit: number;
   grossMarginPercent: number;
   totalItbis: number;
+  cashDrawerLogs?: { id: string; expectedCash: number; countedCash: number; discrepancy: number; createdAt: string }[];
+}
+
+interface Product {
+  id: string; name: string; barcode: string | null; price: number; cost: number; stock: number; category: string | null;
 }
 
 interface PurchaseSuggestion {
-  productId: string;
-  name: string;
-  currentStock: number;
-  dailyVelocity: number;
-  unitsToOrder: number;
-  estimatedCost: number;
-  urgency: 'CRITICAL' | 'HIGH' | 'MEDIUM';
+  productId: string; name: string; currentStock: number; dailyVelocity: number;
+  unitsToOrder: number; estimatedCost: number; urgency: string;
 }
 
-interface PurchaseList {
-  totalProducts: number;
-  totalEstimatedInvestment: number;
-  suggestions: PurchaseSuggestion[];
-}
-
+interface PurchaseList { totalProducts: number; totalEstimatedInvestment: number; suggestions: PurchaseSuggestion[] }
 interface TopProductEntry { name: string; totalQty: number; totalRevenue: number }
 interface TopProducts { byVolume: TopProductEntry[]; byRevenue: TopProductEntry[] }
+interface LowStockProduct { id: string; name: string; stock: number; urgency: string }
+interface NcfRecord { id: string; ncf: string; ncfType: string; total: number; itbis: number; clientRnc: string | null; createdAt: string }
 
-interface LowStockProduct {
-  id: string; name: string; stock: number; urgency: string;
-}
-
-interface NcfRecord {
-  id: string; ncf: string; ncfType: string; total: number; itbis: number;
-  clientRnc: string | null; createdAt: string;
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// METRIC CARD COMPONENT
-// ──────────────────────────────────────────────────────────────────────────────
-function MetricCard({ label, value, sub, color = 'text-white' }: {
-  label: string; value: string | number; sub?: string; color?: string;
+function MetricCard({ label, value, sub, accent = 'text-slate-900' }: {
+  label: string; value: string | number; sub?: string; accent?: string;
 }) {
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 flex flex-col gap-1">
-      <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">{label}</p>
-      <p className={`text-3xl font-black tabular-nums ${color}`}>{value}</p>
-      {sub && <p className="text-slate-500 text-sm">{sub}</p>}
+    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+      <p className={`mt-2 text-2xl font-bold tabular-nums ${accent}`}>{value}</p>
+      {sub && <p className="mt-1 text-sm text-slate-400">{sub}</p>}
     </div>
   );
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// URGENCY BADGE
-// ──────────────────────────────────────────────────────────────────────────────
 function UrgencyBadge({ urgency }: { urgency: string }) {
   const styles: Record<string, string> = {
-    CRITICAL:     'bg-red-500/20 text-red-400 border border-red-500/30',
-    HIGH:         'bg-orange-500/20 text-orange-400 border border-orange-500/30',
-    MEDIUM:       'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30',
-    OUT_OF_STOCK: 'bg-red-700/30 text-red-300 border border-red-700/40',
-    LOW:          'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30',
+    CRITICAL: 'bg-red-50 text-red-700 border-red-200',
+    HIGH: 'bg-orange-50 text-orange-700 border-orange-200',
+    MEDIUM: 'bg-amber-50 text-amber-700 border-amber-200',
+    OUT_OF_STOCK: 'bg-red-100 text-red-800 border-red-300',
+    LOW: 'bg-yellow-50 text-yellow-700 border-yellow-200',
   };
   return (
-    <span className={`px-2 py-0.5 rounded-md text-xs font-bold ${styles[urgency] ?? styles.MEDIUM}`}>
+    <span className={`inline-block rounded-md border px-2 py-0.5 text-xs font-semibold ${styles[urgency] ?? styles.MEDIUM}`}>
       {urgency}
     </span>
   );
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// SECTION HEADER
-// ──────────────────────────────────────────────────────────────────────────────
 function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <div className="mb-4">
-      <h2 className="text-xl font-black text-white tracking-tight">{title}</h2>
-      {subtitle && <p className="text-slate-400 text-sm mt-0.5">{subtitle}</p>}
+      <h2 className="text-lg font-bold text-slate-900">{title}</h2>
+      {subtitle && <p className="mt-0.5 text-sm text-slate-500">{subtitle}</p>}
     </div>
   );
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// MAIN ADMIN DASHBOARD PAGE
-// ──────────────────────────────────────────────────────────────────────────────
+function Panel({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  return <div className={`rounded-xl border border-slate-200 bg-white p-6 shadow-sm ${className}`}>{children}</div>;
+}
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'overview', label: 'Resumen' },
+  { id: 'inventory', label: 'Inventario' },
+  { id: 'fiscal', label: 'Fiscal' },
+  { id: 'settings', label: 'Configuración' },
+  { id: 'employees', label: 'Empleados' },
+];
+
 export default function AdminDashboard() {
+  const { user, logout, setLicenseBlocked } = useAuth();
+  const tenantId = user?.tenantId ?? '';
+
   const [finance, setFinance] = useState<FinancialSummary | null>(null);
   const [topProducts, setTopProducts] = useState<TopProducts | null>(null);
-  const [peakHours, setPeakHours] = useState<any[]>([]);
+  const [peakHours, setPeakHours] = useState<{ label: string; salesCount: number }[]>([]);
   const [purchaseList, setPurchaseList] = useState<PurchaseList | null>(null);
   const [lowStock, setLowStock] = useState<{ products: LowStockProduct[] } | null>(null);
   const [ncfLog, setNcfLog] = useState<NcfRecord[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'inventory' | 'fiscal'>('overview');
+  const [activeTab, setActiveTab] = useState<Tab>('overview');
+  const [showAddProduct, setShowAddProduct] = useState(false);
+  const [showCashClose, setShowCashClose] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const fetchAll = useCallback(async () => {
+    if (!tenantId) return;
     setLoading(true);
     try {
-      const [fin, top, peak, purchase, stock, ncf] = await Promise.all([
-        fetch(`${API}/finance/daily?tenantId=${TENANT_ID}`).then((r) => r.json()),
-        fetch(`${API}/analytics/top-products?tenantId=${TENANT_ID}`).then((r) => r.json()),
-        fetch(`${API}/analytics/peak-hours?tenantId=${TENANT_ID}`).then((r) => r.json()),
-        fetch(`${API}/analytics/purchase-list?tenantId=${TENANT_ID}`).then((r) => r.json()),
-        fetch(`${API}/analytics/low-stock?tenantId=${TENANT_ID}`).then((r) => r.json()),
-        fetch(`${API}/finance/ncf-log?tenantId=${TENANT_ID}`).then((r) => r.json()),
+      const [fin, top, peak, purchase, stock, ncf, prods] = await Promise.all([
+        apiFetch<FinancialSummary>('/finance/daily', tenantId),
+        apiFetch<TopProducts>('/analytics/top-products', tenantId),
+        apiFetch<{ label: string; salesCount: number }[]>('/analytics/peak-hours', tenantId),
+        apiFetch<PurchaseList>('/analytics/purchase-list', tenantId),
+        apiFetch<{ products: LowStockProduct[] }>('/analytics/low-stock', tenantId),
+        apiFetch<{ records: NcfRecord[] }>('/finance/ncf-log', tenantId),
+        apiFetch<Product[]>('/catalog/products', tenantId),
       ]);
       setFinance(fin);
       setTopProducts(top);
-      setPeakHours(Array.isArray(peak) ? peak.filter((h: any) => h.salesCount > 0) : []);
+      setPeakHours(Array.isArray(peak) ? peak.filter((h) => h.salesCount > 0) : []);
       setPurchaseList(purchase);
       setLowStock(stock);
       setNcfLog(ncf?.records ?? []);
+      setProducts(prods);
     } catch (err) {
-      console.error('Dashboard fetch error', err);
+      if (err instanceof LicenseBlockedError) {
+        setLicenseBlocked(err.message);
+      } else {
+        console.error('Dashboard fetch error', err);
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [tenantId, setLicenseBlocked]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
+  const handleAddProduct = async (data: ProductFormData) => {
+    await apiFetch('/catalog/product', tenantId, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    await fetchAll();
+  };
+
+  const handleExport607 = async (format: 'json' | 'csv') => {
+    setExporting(true);
+    try {
+      const res = await fetch(`/api/proxy/finance/report/607/export?tenantId=${tenantId}&format=${format}`, {
+        credentials: 'include',
+      });
+      const data = await res.json();
+      if (format === 'csv') {
+        downloadFile(data.content, data.filename, 'text/csv');
+      } else {
+        downloadFile(JSON.stringify(data.content, null, 2), data.filename, 'application/json');
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Error al exportar');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const expectedCashToday = finance?.cashDrawerLogs?.length
+    ? undefined
+    : finance?.grossRevenue;
+
   return (
-    <div className="min-h-screen bg-slate-950 text-white font-sans">
-      {/* ── HEADER ── */}
-      <header className="bg-slate-900 border-b border-slate-800 px-8 py-4 flex items-center justify-between sticky top-0 z-40 shadow-xl">
-        <div>
-          <h1 className="text-2xl font-black tracking-tight">
-            <span className="text-indigo-400">Mini</span>Market OS
-            <span className="text-slate-500 font-normal text-lg ml-2">Admin</span>
-          </h1>
-        </div>
-        <nav className="flex gap-2">
-          {(['overview', 'inventory', 'fiscal'] as const).map((tab) => (
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
+      <ReceiptPrinter />
+
+      <AddProductModal isOpen={showAddProduct} onClose={() => setShowAddProduct(false)} onSave={handleAddProduct} />
+      <CashCloseModal
+        isOpen={showCashClose}
+        tenantId={tenantId}
+        expectedCash={finance?.grossRevenue}
+        onClose={() => setShowCashClose(false)}
+        onSuccess={fetchAll}
+      />
+
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white px-6 py-4 shadow-sm">
+        <div className="mx-auto flex max-w-screen-2xl flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-bold tracking-tight">
+              <span className="text-indigo-600">Mini</span>Market OS
+              <span className="ml-2 text-base font-normal text-slate-500">Admin</span>
+            </h1>
+            {user && <p className="text-xs text-slate-400">{user.name} · {user.role}</p>}
+          </div>
+
+          <nav className="flex flex-wrap gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                  activeTab === tab.id ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+
+          <div className="flex gap-2">
             <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2 rounded-lg font-bold text-sm capitalize transition-colors ${
-                activeTab === tab
-                  ? 'bg-indigo-600 text-white'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
+              onClick={() => setShowCashClose(true)}
+              className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100"
             >
-              {tab === 'overview' ? '📊 Resumen' : tab === 'inventory' ? '📦 Inventario' : '🧾 Fiscal'}
+              Cierre de Caja
             </button>
-          ))}
-        </nav>
-        <button
-          onClick={fetchAll}
-          disabled={loading}
-          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-bold transition-colors"
-        >
-          {loading ? 'Cargando…' : '↻ Actualizar'}
-        </button>
+            <button
+              onClick={fetchAll}
+              disabled={loading}
+              className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+            >
+              {loading ? 'Cargando…' : '↻ Actualizar'}
+            </button>
+            <button
+              onClick={logout}
+              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-500 hover:bg-slate-50"
+            >
+              Salir
+            </button>
+          </div>
+        </div>
       </header>
 
-      <main className="px-6 py-8 max-w-screen-2xl mx-auto space-y-10">
+      <main className="mx-auto max-w-screen-2xl space-y-8 px-6 py-8">
 
-        {/* ── OVERVIEW TAB ── */}
         {activeTab === 'overview' && (
           <>
-            {/* Financial Metrics */}
             <section>
               <SectionHeader title="Resumen Financiero de Hoy" subtitle="Actualizado en tiempo real desde PostgreSQL" />
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                <MetricCard label="Ventas" value={finance?.totalSales ?? '—'} />
-                <MetricCard
-                  label="Ingresos Brutos"
-                  value={`RD$ ${(finance?.grossRevenue ?? 0).toLocaleString()}`}
-                  color="text-emerald-400"
-                />
-                <MetricCard
-                  label="Costo Total"
-                  value={`RD$ ${(finance?.totalCost ?? 0).toLocaleString()}`}
-                  color="text-red-400"
-                />
-                <MetricCard
-                  label="Ganancia Neta"
-                  value={`RD$ ${(finance?.netProfit ?? 0).toLocaleString()}`}
-                  color={finance?.netProfit && finance.netProfit > 0 ? 'text-emerald-400' : 'text-red-400'}
-                />
-                <MetricCard
-                  label="Margen Bruto"
-                  value={`${finance?.grossMarginPercent ?? 0}%`}
-                  color="text-indigo-400"
-                />
-                <MetricCard
-                  label="ITBIS 18%"
-                  value={`RD$ ${(finance?.totalItbis ?? 0).toLocaleString()}`}
-                  color="text-amber-400"
-                  sub="Colectado DGII"
-                />
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+                <MetricCard label="Ingresos" value={`RD$ ${(finance?.grossRevenue ?? 0).toLocaleString()}`} accent="text-emerald-600" />
+                <MetricCard label="Costos" value={`RD$ ${(finance?.totalCost ?? 0).toLocaleString()}`} accent="text-red-600" />
+                <MetricCard label="Margen" value={`${finance?.grossMarginPercent ?? 0}%`} accent="text-indigo-600"
+                  sub={`Ganancia: RD$ ${(finance?.netProfit ?? 0).toLocaleString()}`} />
+                <MetricCard label="ITBIS" value={`RD$ ${(finance?.totalItbis ?? 0).toLocaleString()}`} accent="text-amber-600" sub="Colectado DGII · 18%" />
+              </div>
+              <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <MetricCard label="Ventas del día" value={finance?.totalSales ?? '—'} />
+                <MetricCard label="Ganancia Neta" value={`RD$ ${(finance?.netProfit ?? 0).toLocaleString()}`}
+                  accent={finance?.netProfit && finance.netProfit > 0 ? 'text-emerald-600' : 'text-red-600'} />
               </div>
             </section>
 
-            {/* Peak Hours */}
+            {finance?.cashDrawerLogs && finance.cashDrawerLogs.length > 0 && (
+              <section>
+                <SectionHeader title="Cierres de Caja Recientes" />
+                <Panel>
+                  <ul className="space-y-2 text-sm">
+                    {finance.cashDrawerLogs.map((log) => (
+                      <li key={log.id} className="flex justify-between border-b border-slate-100 py-2">
+                        <span className="text-slate-500">{new Date(log.createdAt).toLocaleString('es-DO')}</span>
+                        <span className={log.discrepancy === 0 ? 'text-emerald-600' : log.discrepancy > 0 ? 'text-amber-600' : 'text-red-600'}>
+                          Dif: RD$ {log.discrepancy.toFixed(2)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </Panel>
+              </section>
+            )}
+
             <section>
-              <SectionHeader
-                title="Horas Pico de Ventas (Últimos 30 días)"
-                subtitle="Optimiza tus cajeros y deliveries basado en estos datos"
-              />
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+              <SectionHeader title="Horas Pico de Ventas" subtitle="Últimos 30 días" />
+              <Panel>
                 {peakHours.length === 0 ? (
-                  <p className="text-slate-500 text-center py-12">Sin datos de ventas todavía.</p>
+                  <p className="py-12 text-center text-slate-400">Sin datos de ventas todavía.</p>
                 ) : (
                   <ResponsiveContainer width="100%" height={260}>
                     <BarChart data={peakHours} margin={{ left: -10 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                       <XAxis dataKey="label" tick={{ fill: '#64748b', fontSize: 11 }} />
                       <YAxis tick={{ fill: '#64748b', fontSize: 11 }} />
-                      <Tooltip
-                        contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: 8 }}
-                        labelStyle={{ color: '#94a3b8' }}
-                        itemStyle={{ color: '#818cf8' }}
-                      />
+                      <Tooltip contentStyle={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: 8 }} />
                       <Bar dataKey="salesCount" fill="#6366f1" radius={[4, 4, 0, 0]} name="Ventas" />
                     </BarChart>
                   </ResponsiveContainer>
                 )}
-              </div>
+              </Panel>
             </section>
 
-            {/* Top Products */}
             <section>
-              <SectionHeader title="Top 5 Productos" subtitle="Por volumen y por ingresos generados" />
-              <div className="grid md:grid-cols-2 gap-6">
-                {/* By Volume */}
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-                  <h3 className="text-slate-300 font-bold mb-4 flex items-center gap-2">🏆 Por Unidades Vendidas</h3>
+              <SectionHeader title="Top 5 Productos" />
+              <div className="grid gap-6 md:grid-cols-2">
+                <Panel>
+                  <h3 className="mb-4 text-sm font-semibold text-slate-700">Por Unidades Vendidas</h3>
                   <ul className="space-y-3">
                     {(topProducts?.byVolume ?? []).map((p, i) => (
                       <li key={i} className="flex items-center gap-3">
-                        <span className="text-slate-600 font-black w-5">{i + 1}</span>
-                        <div className="flex-1">
-                          <div className="text-white font-semibold text-sm truncate">{p.name}</div>
-                          <div className="w-full bg-slate-800 rounded-full h-1.5 mt-1">
-                            <div
-                              className="bg-indigo-500 h-1.5 rounded-full"
-                              style={{ width: `${Math.min(100, (p.totalQty / (topProducts?.byVolume[0]?.totalQty || 1)) * 100)}%` }}
-                            />
+                        <span className="w-5 text-sm font-bold text-slate-400">{i + 1}</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-medium">{p.name}</div>
+                          <div className="mt-1 h-1.5 w-full rounded-full bg-slate-100">
+                            <div className="h-1.5 rounded-full bg-indigo-500"
+                              style={{ width: `${Math.min(100, (p.totalQty / (topProducts?.byVolume[0]?.totalQty || 1)) * 100)}%` }} />
                           </div>
                         </div>
-                        <span className="text-indigo-400 font-black text-sm tabular-nums">{p.totalQty} uds</span>
+                        <span className="text-sm font-semibold text-indigo-600">{p.totalQty} uds</span>
                       </li>
                     ))}
-                    {(!topProducts?.byVolume?.length) && (
-                      <p className="text-slate-500 text-sm">Sin datos.</p>
-                    )}
                   </ul>
-                </div>
-                {/* By Revenue */}
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-                  <h3 className="text-slate-300 font-bold mb-4 flex items-center gap-2">💰 Por Ingresos Generados</h3>
+                </Panel>
+                <Panel>
+                  <h3 className="mb-4 text-sm font-semibold text-slate-700">Por Ingresos</h3>
                   <ul className="space-y-3">
                     {(topProducts?.byRevenue ?? []).map((p, i) => (
                       <li key={i} className="flex items-center gap-3">
-                        <span className="text-slate-600 font-black w-5">{i + 1}</span>
-                        <div className="flex-1">
-                          <div className="text-white font-semibold text-sm truncate">{p.name}</div>
-                          <div className="w-full bg-slate-800 rounded-full h-1.5 mt-1">
-                            <div
-                              className="bg-emerald-500 h-1.5 rounded-full"
-                              style={{ width: `${Math.min(100, (p.totalRevenue / (topProducts?.byRevenue[0]?.totalRevenue || 1)) * 100)}%` }}
-                            />
-                          </div>
-                        </div>
-                        <span className="text-emerald-400 font-black text-sm tabular-nums">
-                          RD$ {p.totalRevenue.toLocaleString()}
-                        </span>
+                        <span className="w-5 text-sm font-bold text-slate-400">{i + 1}</span>
+                        <div className="min-w-0 flex-1 truncate text-sm font-medium">{p.name}</div>
+                        <span className="text-sm font-semibold text-emerald-600">RD$ {p.totalRevenue.toLocaleString()}</span>
                       </li>
                     ))}
-                    {(!topProducts?.byRevenue?.length) && (
-                      <p className="text-slate-500 text-sm">Sin datos.</p>
-                    )}
                   </ul>
-                </div>
+                </Panel>
               </div>
             </section>
           </>
         )}
 
-        {/* ── INVENTORY TAB ── */}
         {activeTab === 'inventory' && (
           <>
-            {/* Low Stock Alerts */}
+            <div className="flex items-center justify-between">
+              <SectionHeader title="Inventario" subtitle={`${products.length} productos registrados`} />
+              <button
+                onClick={() => setShowAddProduct(true)}
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
+              >
+                + Agregar Producto
+              </button>
+            </div>
+
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50 text-slate-500">
+                    <th className="px-6 py-3 text-left font-semibold">Producto</th>
+                    <th className="px-4 py-3 text-left font-semibold">Código</th>
+                    <th className="px-4 py-3 text-right font-semibold">Precio</th>
+                    <th className="px-4 py-3 text-right font-semibold">Stock</th>
+                    <th className="px-4 py-3 text-left font-semibold">Categoría</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {products.map((p) => (
+                    <tr key={p.id} className="border-b border-slate-100 hover:bg-slate-50">
+                      <td className="px-6 py-3 font-medium">{p.name}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-500">{p.barcode || '—'}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">RD$ {p.price.toFixed(2)}</td>
+                      <td className="px-4 py-3 text-right">
+                        <span className={p.stock <= 10 ? 'font-bold text-red-600' : 'text-slate-700'}>{p.stock}</span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-500">{p.category || '—'}</td>
+                    </tr>
+                  ))}
+                  {products.length === 0 && (
+                    <tr><td colSpan={5} className="px-6 py-12 text-center text-slate-400">No hay productos. Agrega el primero.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
             <section>
-              <SectionHeader
-                title={`Alertas de Stock Bajo (${lowStock?.products?.length ?? 0})`}
-                subtitle="Productos con menos de 10 unidades en inventario"
-              />
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <SectionHeader title={`Alertas de Stock Bajo (${lowStock?.products?.length ?? 0})`} />
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {(lowStock?.products ?? []).map((p) => (
-                  <div
-                    key={p.id}
-                    className={`rounded-xl p-5 border flex items-center justify-between ${
-                      p.urgency === 'OUT_OF_STOCK'
-                        ? 'bg-red-500/10 border-red-500/30'
-                        : p.urgency === 'CRITICAL'
-                        ? 'bg-orange-500/10 border-orange-500/30'
-                        : 'bg-slate-900 border-slate-800'
-                    }`}
-                  >
+                  <div key={p.id} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                     <div>
-                      <p className="font-bold text-white">{p.name}</p>
-                      <p className="text-4xl font-black tabular-nums mt-1 text-white">{p.stock}</p>
-                      <p className="text-slate-400 text-xs mt-1">unidades restantes</p>
+                      <p className="font-semibold">{p.name}</p>
+                      <p className="text-3xl font-bold tabular-nums">{p.stock}</p>
                     </div>
                     <UrgencyBadge urgency={p.urgency} />
                   </div>
                 ))}
-                {(!lowStock?.products?.length) && (
-                  <p className="text-slate-500 col-span-full text-center py-16">
-                    ✅ Todo el inventario está en niveles saludables.
-                  </p>
-                )}
               </div>
             </section>
 
-            {/* AI Smart Purchase List */}
             <section>
-              <SectionHeader
-                title="🤖 Lista de Compras Inteligente (IA)"
-                subtitle={
-                  purchaseList
-                    ? `${purchaseList.totalProducts} productos · Inversión estimada: RD$ ${purchaseList.totalEstimatedInvestment.toLocaleString()}`
-                    : 'Calculando…'
-                }
-              />
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+              <SectionHeader title="Lista de Compras Inteligente"
+                subtitle={purchaseList ? `${purchaseList.totalProducts} productos · RD$ ${purchaseList.totalEstimatedInvestment.toLocaleString()}` : ''} />
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-slate-800 text-slate-400">
-                      <th className="text-left px-6 py-4 font-bold uppercase tracking-wider text-xs">Producto</th>
-                      <th className="text-right px-4 py-4 font-bold uppercase tracking-wider text-xs">Stock Actual</th>
-                      <th className="text-right px-4 py-4 font-bold uppercase tracking-wider text-xs">Velocidad/día</th>
-                      <th className="text-right px-4 py-4 font-bold uppercase tracking-wider text-xs">Pedir</th>
-                      <th className="text-right px-6 py-4 font-bold uppercase tracking-wider text-xs">Costo Est.</th>
-                      <th className="text-center px-4 py-4 font-bold uppercase tracking-wider text-xs">Urgencia</th>
+                    <tr className="border-b border-slate-200 bg-slate-50 text-slate-500">
+                      <th className="px-6 py-3 text-left font-semibold">Producto</th>
+                      <th className="px-4 py-3 text-right font-semibold">Stock</th>
+                      <th className="px-4 py-3 text-right font-semibold">Pedir</th>
+                      <th className="px-4 py-3 text-center font-semibold">Urgencia</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(purchaseList?.suggestions ?? []).map((s, i) => (
-                      <tr key={i} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors">
-                        <td className="px-6 py-4 font-semibold text-white">{s.name}</td>
-                        <td className="px-4 py-4 text-right tabular-nums text-slate-300">{s.currentStock}</td>
-                        <td className="px-4 py-4 text-right tabular-nums text-slate-300">{s.dailyVelocity}</td>
-                        <td className="px-4 py-4 text-right tabular-nums font-black text-indigo-400 text-lg">{s.unitsToOrder}</td>
-                        <td className="px-6 py-4 text-right tabular-nums text-emerald-400 font-bold">
-                          RD$ {s.estimatedCost.toLocaleString()}
-                        </td>
-                        <td className="px-4 py-4 text-center">
-                          <UrgencyBadge urgency={s.urgency} />
-                        </td>
+                      <tr key={i} className="border-b border-slate-100">
+                        <td className="px-6 py-3 font-medium">{s.name}</td>
+                        <td className="px-4 py-3 text-right">{s.currentStock}</td>
+                        <td className="px-4 py-3 text-right font-bold text-indigo-600">{s.unitsToOrder}</td>
+                        <td className="px-4 py-3 text-center"><UrgencyBadge urgency={s.urgency} /></td>
                       </tr>
                     ))}
-                    {(!purchaseList?.suggestions?.length) && (
-                      <tr>
-                        <td colSpan={6} className="px-6 py-16 text-center text-slate-500">
-                          ✅ Sin sugerencias de compra actualmente. Inventario en niveles óptimos.
-                        </td>
-                      </tr>
-                    )}
                   </tbody>
                 </table>
               </div>
@@ -380,68 +412,75 @@ export default function AdminDashboard() {
           </>
         )}
 
-        {/* ── FISCAL TAB ── */}
         {activeTab === 'fiscal' && (
-          <section>
-            <SectionHeader
-              title="Registro de Comprobantes Fiscales (NCF)"
-              subtitle="Todos los comprobantes emitidos · Listos para exportar al DGII"
-            />
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+          <section className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <SectionHeader title="Registro NCF" subtitle="Comprobantes fiscales emitidos" />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleExport607('csv')}
+                  disabled={exporting}
+                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium shadow-sm hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Exportar Formato 607 (CSV)
+                </button>
+                <button
+                  onClick={() => handleExport607('json')}
+                  disabled={exporting}
+                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
+                >
+                  Exportar Formato 607 (JSON)
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-slate-800 text-slate-400">
-                    <th className="text-left px-6 py-4 font-bold uppercase tracking-wider text-xs">NCF</th>
-                    <th className="text-left px-4 py-4 font-bold uppercase tracking-wider text-xs">Tipo</th>
-                    <th className="text-left px-4 py-4 font-bold uppercase tracking-wider text-xs">RNC Cliente</th>
-                    <th className="text-right px-4 py-4 font-bold uppercase tracking-wider text-xs">Total</th>
-                    <th className="text-right px-4 py-4 font-bold uppercase tracking-wider text-xs">ITBIS</th>
-                    <th className="text-left px-6 py-4 font-bold uppercase tracking-wider text-xs">Fecha</th>
+                  <tr className="border-b border-slate-200 bg-slate-50 text-slate-500">
+                    <th className="px-6 py-3 text-left font-semibold">NCF</th>
+                    <th className="px-4 py-3 text-left font-semibold">Tipo</th>
+                    <th className="px-4 py-3 text-left font-semibold">RNC Cliente</th>
+                    <th className="px-4 py-3 text-right font-semibold">Total</th>
+                    <th className="px-4 py-3 text-right font-semibold">ITBIS</th>
+                    <th className="px-6 py-3 text-left font-semibold">Fecha</th>
                   </tr>
                 </thead>
                 <tbody>
                   {ncfLog.map((r) => (
-                    <tr key={r.id} className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors">
-                      <td className="px-6 py-4 font-mono font-bold text-indigo-300">{r.ncf}</td>
-                      <td className="px-4 py-4">
-                        <span
-                          className={`px-2 py-0.5 rounded text-xs font-bold ${
-                            r.ncfType === 'CREDITO_FISCAL'
-                              ? 'bg-blue-500/20 text-blue-400'
-                              : r.ncfType === 'GUBERNAMENTAL'
-                              ? 'bg-purple-500/20 text-purple-400'
-                              : 'bg-slate-700 text-slate-300'
-                          }`}
-                        >
-                          {r.ncfType === 'CREDITO_FISCAL'
-                            ? 'B01'
-                            : r.ncfType === 'GUBERNAMENTAL'
-                            ? 'B15'
-                            : 'B02'}
+                    <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50">
+                      <td className="px-6 py-3 font-mono font-semibold text-indigo-600">{r.ncf}</td>
+                      <td className="px-4 py-3">
+                        <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-semibold">
+                          {r.ncfType === 'CREDITO_FISCAL' ? 'B01' : r.ncfType === 'GUBERNAMENTAL' ? 'B15' : 'B02'}
                         </span>
                       </td>
-                      <td className="px-4 py-4 text-slate-400 font-mono">{r.clientRnc || '—'}</td>
-                      <td className="px-4 py-4 text-right tabular-nums text-emerald-400 font-bold">
-                        RD$ {r.total.toLocaleString()}
-                      </td>
-                      <td className="px-4 py-4 text-right tabular-nums text-amber-400">
-                        RD$ {r.itbis.toFixed(2)}
-                      </td>
-                      <td className="px-6 py-4 text-slate-400 text-xs">
-                        {new Date(r.createdAt).toLocaleString('es-DO')}
-                      </td>
+                      <td className="px-4 py-3 font-mono text-slate-500">{r.clientRnc || '—'}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-emerald-600">RD$ {r.total.toLocaleString()}</td>
+                      <td className="px-4 py-3 text-right text-amber-600">RD$ {r.itbis.toFixed(2)}</td>
+                      <td className="px-6 py-3 text-xs text-slate-500">{new Date(r.createdAt).toLocaleString('es-DO')}</td>
                     </tr>
                   ))}
                   {ncfLog.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="px-6 py-16 text-center text-slate-500">
-                        No hay comprobantes fiscales emitidos todavía.
-                      </td>
-                    </tr>
+                    <tr><td colSpan={6} className="px-6 py-16 text-center text-slate-400">No hay comprobantes emitidos.</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
+          </section>
+        )}
+
+        {activeTab === 'settings' && (
+          <section>
+            <SectionHeader title="Configuración de Negocio" subtitle="Personaliza los datos de tu colmado y secuencias NCF" />
+            <TenantSettingsPanel tenantId={tenantId} />
+          </section>
+        )}
+
+        {activeTab === 'employees' && (
+          <section>
+            <SectionHeader title="Gestión de Empleados" subtitle="Crea y administra usuarios con roles ADMIN o CAJERO" />
+            <EmployeesPanel tenantId={tenantId} />
           </section>
         )}
       </main>

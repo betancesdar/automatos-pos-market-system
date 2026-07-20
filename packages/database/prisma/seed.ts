@@ -1,6 +1,19 @@
 import { PrismaClient, NcfType, Role } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import pg from 'pg'
+import { randomBytes, scryptSync } from 'crypto'
+
+function hashPassword(password: string): string {
+  const salt = randomBytes(16).toString('hex')
+  const hash = scryptSync(password, salt, 64).toString('hex')
+  return `${salt}:${hash}`
+}
+
+function defaultExpiry(): Date {
+  const d = new Date()
+  d.setDate(d.getDate() + 30)
+  return d
+}
 
 const DATABASE_URL = process.env.DATABASE_URL ?? 'postgresql://postgres:admin@localhost:5433/minimarket'
 const pool = new pg.Pool({ connectionString: DATABASE_URL })
@@ -10,10 +23,28 @@ const prisma = new PrismaClient({ adapter })
 async function main() {
   console.log('🌱  Seeding database...')
 
+  // Super Admin — Darío Betances
+  const superEmail = 'dario@minimarket-os.com'
+  const existingSuper = await prisma.user.findUnique({ where: { email: superEmail } })
+  if (!existingSuper) {
+    await prisma.user.create({
+      data: {
+        name: 'Darío Betances',
+        email: superEmail,
+        password: hashPassword('superadmin2026'),
+        role: Role.SUPER_ADMIN,
+        tenantId: null,
+      },
+    })
+    console.log('✅  SUPER_ADMIN: dario@minimarket-os.com / superadmin2026')
+  } else {
+    console.log('⚠️   SUPER_ADMIN already exists')
+  }
+
   const existing = await prisma.tenant.findFirst({ where: { rnc: '123456789' } })
   if (existing) {
-    console.log(`⚠️   Tenant already seeded (id: ${existing.id}). Skipping.`)
-    console.log(`\n    🔑  NEXT_PUBLIC_TENANT_ID=${existing.id}\n`)
+    console.log(`⚠️   Tenant already seeded (id: ${existing.id}). Skipping demo tenant.`)
+    console.log('\n🎉  Seed complete!')
     return
   }
 
@@ -23,43 +54,52 @@ async function main() {
       rnc: '123456789',
       phone: '809-555-1234',
       address: 'Calle Principal #1, Santo Domingo',
+      isActive: true,
+      plan: 'PREMIUM',
+      expiresAt: defaultExpiry(),
     },
   })
 
   console.log(`✅  Tenant: ${tenant.name} (id: ${tenant.id})`)
-  console.log(`\n    🔑  Copy this TENANT_ID for the frontend:`)
-  console.log(`    NEXT_PUBLIC_TENANT_ID=${tenant.id}\n`)
 
-  await prisma.user.create({
-    data: {
-      name: 'Admin Principal',
-      email: 'admin@elprimo.com',
-      password: 'plaintext_for_dev_only', // Use bcrypt in production
-      role: Role.ADMIN,
-      tenantId: tenant.id,
-    },
+  await prisma.user.createMany({
+    data: [
+      {
+        name: 'Admin Principal',
+        email: 'admin@elprimo.com',
+        password: hashPassword('admin123'),
+        role: Role.ADMIN,
+        tenantId: tenant.id,
+      },
+      {
+        name: 'Cajero Demo',
+        email: 'cajero@elprimo.com',
+        password: hashPassword('cajero123'),
+        role: Role.CASHIER,
+        tenantId: tenant.id,
+      },
+    ],
   })
+  console.log('✅  Users: admin@elprimo.com / admin123, cajero@elprimo.com / cajero123')
 
   await prisma.nCFSequence.createMany({
     data: [
       { tenantId: tenant.id, type: NcfType.CONSUMIDOR_FINAL, prefix: 'B02', nextValue: 1 },
-      { tenantId: tenant.id, type: NcfType.CREDITO_FISCAL,   prefix: 'B01', nextValue: 1 },
-      { tenantId: tenant.id, type: NcfType.GUBERNAMENTAL,    prefix: 'B15', nextValue: 1 },
+      { tenantId: tenant.id, type: NcfType.CREDITO_FISCAL, prefix: 'B01', nextValue: 1 },
+      { tenantId: tenant.id, type: NcfType.GUBERNAMENTAL, prefix: 'B15', nextValue: 1 },
     ],
   })
-  console.log('✅  NCF sequences: B01, B02, B15')
 
   const products = [
-    { barcode: '7460111111111', name: 'Refresco Imperio Rojo 500ml',    category: 'Bebidas',   price: 25,  cost: 15,  stock: 100 },
-    { barcode: '7460222222222', name: 'Salami Super Especial Induveca', category: 'Embutidos', price: 150, cost: 110, stock: 50  },
-    { barcode: '7460333333333', name: 'Ron Brugal Añejo 700ml',         category: 'Licores',   price: 550, cost: 400, stock: 20  },
-    { barcode: '7460444444444', name: 'Jugo Rica Naranja 1L',           category: 'Bebidas',   price: 80,  cost: 60,  stock: 40  },
-    { barcode: '7460555555555', name: 'Cerveza Presidente Grande',      category: 'Bebidas',   price: 180, cost: 130, stock: 200 },
+    { barcode: '7460111111111', name: 'Refresco Imperio Rojo 500ml', category: 'Bebidas', price: 25, cost: 15, stock: 100 },
+    { barcode: '7460222222222', name: 'Salami Super Especial Induveca', category: 'Embutidos', price: 150, cost: 110, stock: 50 },
+    { barcode: '7460333333333', name: 'Ron Brugal Añejo 700ml', category: 'Licores', price: 550, cost: 400, stock: 20 },
+    { barcode: '7460444444444', name: 'Jugo Rica Naranja 1L', category: 'Bebidas', price: 80, cost: 60, stock: 40 },
+    { barcode: '7460555555555', name: 'Cerveza Presidente Grande', category: 'Bebidas', price: 180, cost: 130, stock: 200 },
   ]
 
   for (const p of products) {
     await prisma.product.create({ data: { ...p, tenantId: tenant.id } })
-    console.log(`   📦  ${p.name}`)
   }
 
   console.log('\n🎉  Seed complete!')

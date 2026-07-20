@@ -1,6 +1,6 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { Cache } from 'cache-manager';
+import type { Cache } from 'cache-manager';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const COMMON_DOMINICAN_PRODUCTS = [
@@ -62,7 +62,7 @@ export class CatalogService {
     }
 
     // Not found - run Levenshtein suggestion
-    let bestMatch = null;
+    let bestMatch: (typeof COMMON_DOMINICAN_PRODUCTS)[number] | null = null;
     let minDistance = Infinity;
 
     for (const p of COMMON_DOMINICAN_PRODUCTS) {
@@ -83,10 +83,27 @@ export class CatalogService {
     };
   }
 
-  async addProduct(tenantId: string, data: any) {
+  async addProduct(tenantId: string, data: {
+    barcode?: string;
+    name: string;
+    price: number;
+    cost?: number;
+    stock?: number;
+    category?: string;
+  }) {
+    if (!data.name?.trim()) throw new BadRequestException('Product name is required');
+    if (data.price == null || data.price < 0) throw new BadRequestException('Valid price is required');
+    if (data.cost != null && data.cost < 0) throw new BadRequestException('Cost cannot be negative');
+    if (data.stock != null && data.stock < 0) throw new BadRequestException('Stock cannot be negative');
+
     const product = await this.prisma.product.create({
       data: {
-        ...data,
+        barcode: data.barcode?.trim() || null,
+        name: data.name.trim(),
+        price: data.price,
+        cost: data.cost ?? 0,
+        stock: data.stock ?? 0,
+        category: data.category?.trim() || null,
         tenantId,
       },
     });
@@ -94,7 +111,50 @@ export class CatalogService {
     if (product.barcode) {
       await this.cacheManager.set(`product:${tenantId}:${product.barcode}`, product, 300000);
     }
-    
+
     return product;
+  }
+
+  async listProducts(tenantId: string) {
+    return this.prisma.product.findMany({
+      where: { tenantId },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async updateProduct(tenantId: string, productId: string, data: Partial<{
+    barcode: string;
+    name: string;
+    price: number;
+    cost: number;
+    stock: number;
+    category: string;
+  }>) {
+    const product = await this.prisma.product.findFirst({ where: { id: productId, tenantId } });
+    if (!product) throw new NotFoundException('Product not found');
+
+    const updated = await this.prisma.product.update({
+      where: { id: productId },
+      data: {
+        ...(data.barcode !== undefined && { barcode: data.barcode?.trim() || null }),
+        ...(data.name !== undefined && { name: data.name.trim() }),
+        ...(data.price !== undefined && { price: data.price }),
+        ...(data.cost !== undefined && { cost: data.cost }),
+        ...(data.stock !== undefined && { stock: data.stock }),
+        ...(data.category !== undefined && { category: data.category?.trim() || null }),
+      },
+    });
+
+    if (updated.barcode) {
+      await this.cacheManager.set(`product:${tenantId}:${updated.barcode}`, updated, 300000);
+    }
+    return updated;
+  }
+
+  async deleteProduct(tenantId: string, productId: string) {
+    const product = await this.prisma.product.findFirst({ where: { id: productId, tenantId } });
+    if (!product) throw new NotFoundException('Product not found');
+    await this.prisma.product.delete({ where: { id: productId } });
+    return { deleted: true };
   }
 }

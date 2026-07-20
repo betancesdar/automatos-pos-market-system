@@ -1,0 +1,81 @@
+version: "3.9"
+
+services:
+  minimarket_postgres_prod:
+    image: postgres:15-alpine
+    container_name: minimarket_postgres_prod
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    networks:
+      - minimarket_internal
+    # Sin puertos expuestos — solo accesible dentro de la red Docker
+
+  minimarket_redis_prod:
+    image: redis:7-alpine
+    container_name: minimarket_redis_prod
+    restart: always
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_prod_data:/data
+    networks:
+      - minimarket_internal
+
+  minimarket_api_prod:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: minimarket_api_prod
+    restart: always
+    ports:
+      - "4000:4000"
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@minimarket_postgres_prod:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@minimarket_redis_prod:6379
+      JWT_SECRET: ${JWT_SECRET}
+      COOKIE_SECRET: ${COOKIE_SECRET}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+    depends_on:
+      - minimarket_postgres_prod
+      - minimarket_redis_prod
+    networks:
+      - minimarket_internal
+      - minimarket_public
+
+  minimarket_web_prod:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        JWT_SECRET: ${JWT_SECRET}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    container_name: minimarket_web_prod
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      JWT_SECRET: ${JWT_SECRET}
+      API_INTERNAL_URL: http://minimarket_api_prod:4000
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    depends_on:
+      - minimarket_api_prod
+    networks:
+      - minimarket_public
+
+networks:
+  minimarket_internal:
+    driver: bridge
+    internal: true
+  minimarket_public:
+    driver: bridge
+
+volumes:
+  postgres_prod_data:
+  redis_prod_data:

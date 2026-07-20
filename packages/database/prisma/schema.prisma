@@ -9,36 +9,40 @@ datasource db {
   provider = "postgresql"
 }
 
-// El Negocio (Colmado o Minimarket)
+// El Negocio (Colmado o Minimarket) — Tenant SaaS
 model Tenant {
   id        String   @id @default(uuid())
-  name      String   // Ejemplo: Colmado El Primo
-  rnc       String?  // RNC del negocio (opcional para colmados pequeños)
+  name      String
+  rnc       String   @unique
   phone     String?
   address   String?
+  isActive  Boolean  @default(true)
+  plan      String   @default("BASIC")
+  expiresAt DateTime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users        User[]
-  products     Product[]
-  sales        Sale[]
-  ncfSequences NCFSequence[]
+  users          User[]
+  products       Product[]
+  sales          Sale[]
+  ncfSequences   NCFSequence[]
   cashDrawerLogs CashDrawerLog[]
 }
 
-// Usuarios (Cajeros, Administradores)
+// Usuarios (Super Admin, Administradores de colmado, Cajeros)
 model User {
   id        String   @id @default(uuid())
   name      String
   email     String   @unique
   password  String
   role      Role     @default(CASHIER)
-  tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  tenantId  String?
+  tenant    Tenant?  @relation(fields: [tenantId], references: [id])
   createdAt DateTime @default(now())
 }
 
 enum Role {
+  SUPER_ADMIN
   ADMIN
   CASHIER
 }
@@ -46,10 +50,10 @@ enum Role {
 // Inventario
 model Product {
   id        String     @id @default(uuid())
-  barcode   String?    // Para el escáner
+  barcode   String?
   name      String
   price     Float
-  cost      Float      // Para reportes de ganancias
+  cost      Float
   stock     Int        @default(0)
   category  String?
   tenantId  String
@@ -67,7 +71,7 @@ model NCFSequence {
   tenantId  String
   tenant    Tenant   @relation(fields: [tenantId], references: [id])
   type      NcfType
-  prefix    String   // e.g., B01, B02, B15
+  prefix    String
   nextValue Int      @default(1)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -84,7 +88,7 @@ model Sale {
   ncf          String?
   ncfType      NcfType    @default(CONSUMIDOR_FINAL)
   clientRnc    String?
-  itbis        Float      @default(0)  // 18% ITBIS captured
+  itbis        Float      @default(0)
   tenantId     String
   tenant       Tenant     @relation(fields: [tenantId], references: [id])
   createdAt    DateTime   @default(now())
@@ -92,31 +96,31 @@ model Sale {
 }
 
 model SaleItem {
-  id        String   @id @default(uuid())
+  id        String  @id @default(uuid())
   saleId    String
-  sale      Sale     @relation(fields: [saleId], references: [id])
+  sale      Sale    @relation(fields: [saleId], references: [id])
   productId String
-  product   Product  @relation(fields: [productId], references: [id])
+  product   Product @relation(fields: [productId], references: [id])
   quantity  Int
   price     Float
-  cost      Float    // Snapshot del costo al momento de la venta
+  cost      Float
 }
 
 // Cierre de Caja (Cash Drawer Audit)
 model CashDrawerLog {
-  id                 String   @id @default(uuid())
-  tenantId           String
-  tenant             Tenant   @relation(fields: [tenantId], references: [id])
-  shiftDate          DateTime @default(now())
-  expectedCash       Float    // Calculated from all cashReceived for the day
-  countedCash        Float    // Physical count from cashier
-  discrepancy        Float    // countedCash - expectedCash (negative = faltante, positive = sobrante)
-  notes              String?
-  createdAt          DateTime @default(now())
+  id           String   @id @default(uuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  shiftDate    DateTime @default(now())
+  expectedCash Float
+  countedCash  Float
+  discrepancy  Float
+  notes        String?
+  createdAt    DateTime @default(now())
 }
 
 enum NcfType {
-  CONSUMIDOR_FINAL   // B02
-  CREDITO_FISCAL     // B01
-  GUBERNAMENTAL      // B15
+  CONSUMIDOR_FINAL
+  CREDITO_FISCAL
+  GUBERNAMENTAL
 }

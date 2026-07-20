@@ -24,6 +24,16 @@ export class FinanceController {
     return this.financeService.getDailySummary(tenantId);
   }
 
+  @Get('report/607/export')
+  async export607Report(
+    @Query('tenantId') tenantId: string,
+    @Query('format') format: 'json' | 'csv' = 'json',
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.financeService.export607Report(tenantId, format, from, to);
+  }
+
   @Get('report/606')
   async get606Report(
     @Query('tenantId') tenantId: string,

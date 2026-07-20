@@ -12,7 +12,7 @@ export function ReceiptPrinter() {
         return;
       }
       
-      const newPort = await navigator.serial.requestPort();
+      const newPort = await navigator.serial!.requestPort();
       await newPort.open({ baudRate: 9600 }); // Common for POS printers
       setPort(newPort);
       console.log('Printer connected');

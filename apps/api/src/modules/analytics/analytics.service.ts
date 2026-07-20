@@ -104,7 +104,18 @@ export class AnalyticsService {
       velocityMap.set(item.productId, (velocityMap.get(item.productId) ?? 0) + item.quantity);
     }
 
-    const suggestions = [];
+    const suggestions: {
+      productId: string;
+      name: string;
+      barcode: string | null;
+      currentStock: number;
+      dailyVelocity: number;
+      soldLast7Days: number;
+      projectedDemand7Days: number;
+      unitsToOrder: number;
+      estimatedCost: number;
+      urgency: 'CRITICAL' | 'HIGH' | 'MEDIUM';
+    }[] = [];
 
     for (const product of products) {
       const soldLast7Days = velocityMap.get(product.id) ?? 0;

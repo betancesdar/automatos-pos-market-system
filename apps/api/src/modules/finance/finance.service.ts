@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NcfType } from '@prisma/client';
+import { buildCashCloseReceipt } from '../../common/escpos.util';
 
 const ITBIS_RATE = 0.18; // 18% Dominican ITBIS tax
 
@@ -87,6 +88,30 @@ export class FinanceService {
     };
   }
 
+  async export607Report(tenantId: string, format: 'json' | 'csv' = 'json', from?: string, to?: string) {
+    const report = await this.generate606Report(tenantId, from, to);
+
+    if (format === 'csv') {
+      const headers = [
+        'rnc_cedula_tercero',
+        'tipo_bienes_servicios_compras',
+        'ncf',
+        'fecha',
+        'monto_facturado_servicios',
+        'monto_facturado_bienes',
+        'itbis_facturado',
+        'total_monto_facturado',
+      ];
+      const rows = report.records.map((r) =>
+        headers.map((h) => `"${String((r as Record<string, unknown>)[h] ?? '').replace(/"/g, '""')}"`).join(','),
+      );
+      const csv = [headers.join(','), ...rows].join('\n');
+      return { format: 'csv', content: csv, filename: `formato-607-${new Date().toISOString().slice(0, 10)}.csv`, report };
+    }
+
+    return { format: 'json', content: report, filename: `formato-607-${new Date().toISOString().slice(0, 10)}.json` };
+  }
+
   // ──────────────────────────────────────────────────────────────────────────
   // CIERRE DE CAJA (Daily Cash Drawer Close)
   // ──────────────────────────────────────────────────────────────────────────
@@ -117,15 +142,24 @@ export class FinanceService {
       },
     });
 
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId } });
+    const status = discrepancy === 0 ? 'BALANCED' : discrepancy > 0 ? 'SOBRANTE' : 'FALTANTE';
+    const message =
+      discrepancy === 0
+        ? 'Caja cuadrada perfectamente.'
+        : discrepancy > 0
+        ? `Sobrante de RD$ ${Math.abs(discrepancy).toFixed(2)}`
+        : `Faltante de RD$ ${Math.abs(discrepancy).toFixed(2)}`;
+
+    const receiptRaw = tenant
+      ? buildCashCloseReceipt(tenant, log, status, message)
+      : null;
+
     return {
       ...log,
-      status: discrepancy === 0 ? 'BALANCED' : discrepancy > 0 ? 'SOBRANTE' : 'FALTANTE',
-      message:
-        discrepancy === 0
-          ? '✅ Caja cuadrada perfectamente.'
-          : discrepancy > 0
-          ? `⚠️ Sobrante de RD$ ${Math.abs(discrepancy).toFixed(2)}`
-          : `🚨 Faltante de RD$ ${Math.abs(discrepancy).toFixed(2)}`,
+      status,
+      message,
+      receiptRaw,
     };
   }
 

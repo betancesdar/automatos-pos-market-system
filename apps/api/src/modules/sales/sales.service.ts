@@ -2,6 +2,8 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NcfType } from '@prisma/client';
 
+const ITBIS_RATE = 0.18;
+
 @Injectable()
 export class SalesService {
   constructor(private prisma: PrismaService) {}
@@ -10,7 +12,7 @@ export class SalesService {
     return this.prisma.$transaction(async (tx) => {
       // 1. Calculate total and check stock
       let total = 0;
-      const saleItemsData = [];
+      const saleItemsData: { productId: string; quantity: number; price: number; cost: number }[] = [];
 
       for (const item of data.items) {
         const product = await tx.product.findUnique({ where: { id: item.productId } });
@@ -36,8 +38,14 @@ export class SalesService {
       if (data.cashReceived < total) throw new BadRequestException('Cash received is less than total');
       const changeDue = data.cashReceived - total;
 
+      let itbis = 0;
+      if (data.ncfType === NcfType.CREDITO_FISCAL || data.ncfType === NcfType.GUBERNAMENTAL) {
+        const taxableAmount = total / (1 + ITBIS_RATE);
+        itbis = parseFloat((total - taxableAmount).toFixed(2));
+      }
+
       // 2. Generate NCF
-      let ncf = null;
+      let ncf: string | null = null;
       if (data.ncfType === NcfType.CREDITO_FISCAL) {
         if (!data.clientRnc || (data.clientRnc.length !== 9 && data.clientRnc.length !== 11)) {
           throw new BadRequestException('Valid RNC is required for CREDITO_FISCAL (9 or 11 digits)');
@@ -67,6 +75,7 @@ export class SalesService {
           ncf,
           ncfType: data.ncfType,
           clientRnc: data.clientRnc,
+          itbis,
           items: {
             create: saleItemsData,
           },
