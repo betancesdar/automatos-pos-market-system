@@ -1,0 +1,122 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// El Negocio (Colmado o Minimarket)
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String   // Ejemplo: Colmado El Primo
+  rnc       String?  // RNC del negocio (opcional para colmados pequeños)
+  phone     String?
+  address   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users        User[]
+  products     Product[]
+  sales        Sale[]
+  ncfSequences NCFSequence[]
+  cashDrawerLogs CashDrawerLog[]
+}
+
+// Usuarios (Cajeros, Administradores)
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role     @default(CASHIER)
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+enum Role {
+  ADMIN
+  CASHIER
+}
+
+// Inventario
+model Product {
+  id        String     @id @default(uuid())
+  barcode   String?    // Para el escáner
+  name      String
+  price     Float
+  cost      Float      // Para reportes de ganancias
+  stock     Int        @default(0)
+  category  String?
+  tenantId  String
+  tenant    Tenant     @relation(fields: [tenantId], references: [id])
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  saleItems SaleItem[]
+
+  @@unique([barcode, tenantId])
+}
+
+// Secuencias de NCF
+model NCFSequence {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  type      NcfType
+  prefix    String   // e.g., B01, B02, B15
+  nextValue Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, type])
+}
+
+// Ventas y Facturación (Adaptado a RD)
+model Sale {
+  id           String     @id @default(uuid())
+  total        Float
+  cashReceived Float?
+  changeDue    Float?
+  ncf          String?
+  ncfType      NcfType    @default(CONSUMIDOR_FINAL)
+  clientRnc    String?
+  itbis        Float      @default(0)  // 18% ITBIS captured
+  tenantId     String
+  tenant       Tenant     @relation(fields: [tenantId], references: [id])
+  createdAt    DateTime   @default(now())
+  items        SaleItem[]
+}
+
+model SaleItem {
+  id        String   @id @default(uuid())
+  saleId    String
+  sale      Sale     @relation(fields: [saleId], references: [id])
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  quantity  Int
+  price     Float
+  cost      Float    // Snapshot del costo al momento de la venta
+}
+
+// Cierre de Caja (Cash Drawer Audit)
+model CashDrawerLog {
+  id                 String   @id @default(uuid())
+  tenantId           String
+  tenant             Tenant   @relation(fields: [tenantId], references: [id])
+  shiftDate          DateTime @default(now())
+  expectedCash       Float    // Calculated from all cashReceived for the day
+  countedCash        Float    // Physical count from cashier
+  discrepancy        Float    // countedCash - expectedCash (negative = faltante, positive = sobrante)
+  notes              String?
+  createdAt          DateTime @default(now())
+}
+
+enum NcfType {
+  CONSUMIDOR_FINAL   // B02
+  CREDITO_FISCAL     // B01
+  GUBERNAMENTAL      // B15
+}

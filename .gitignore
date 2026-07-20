@@ -1,0 +1,19 @@
+cat << 'EOF' > .gitignore
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Next.js & NestJS builds
+.next/
+dist/
+build/
+.turbo/
+
+# Environment files
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+EOF
