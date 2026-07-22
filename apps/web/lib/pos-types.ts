@@ -9,6 +9,15 @@ export const POS_CATEGORY_TABS = [
 
 export type CategorySlug = (typeof POS_CATEGORY_TABS)[number]['slug'];
 
+export interface Category {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string | null;
+  createdAt?: string;
+  _count?: { products: number };
+}
+
 export const RECEIPT_TYPES = [
   { value: 'SIN_NCF', label: 'Consumo (Sin NCF)', applyItbis: false, needsRnc: false },
   { value: 'CREDITO_FISCAL', label: 'Crédito Fiscal (Requiere RNC)', applyItbis: true, needsRnc: true },
@@ -26,6 +35,18 @@ export interface PosProduct {
   barcode: string | null;
   imageUrl: string | null;
   category?: { id: string; name: string; slug: string } | null;
+}
+
+export interface CashSession {
+  id: string;
+  tenantId: string;
+  userId: string;
+  openedAt: string;
+  closedAt: string | null;
+  openingBalance: number;
+  expectedClosingBalance: number | null;
+  actualClosingBalance: number | null;
+  status: 'OPEN' | 'CLOSED';
 }
 
 export interface CartLine {

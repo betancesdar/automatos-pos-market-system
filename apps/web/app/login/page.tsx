@@ -59,23 +59,18 @@ function LoginForm() {
             <label className="mb-1 block text-sm font-medium text-slate-700">Correo</label>
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded-lg border border-slate-300 px-4 py-2.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
-              placeholder="admin@elprimo.com" required />
+              placeholder="Entra tu correo o nombre de usuario" required />
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">Contraseña</label>
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-4 py-2.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" required />
+              className="w-full rounded-lg border border-slate-300 px-4 py-2.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" placeholder="Entra tu contraseña" required />
           </div>
           <button type="submit" disabled={submitting}
             className="w-full rounded-lg bg-indigo-600 py-3 font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">
             {submitting ? 'Entrando…' : 'Iniciar Sesión'}
           </button>
         </form>
-
-        <p className="mt-6 text-center text-xs text-slate-400">
-          Super Admin: dario@minimarket-os.com / superadmin2026<br />
-          Demo colmado: admin@elprimo.com / admin123 · cajero@elprimo.com / cajero123
-        </p>
       </div>
     </div>
   );

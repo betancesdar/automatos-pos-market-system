@@ -16,7 +16,7 @@ export class FinanceService {
     const dateFilter = this.buildDateFilter(from, to);
 
     const sales = await this.prisma.sale.findMany({
-      where: { tenantId, createdAt: dateFilter },
+      where: { tenantId, status: { not: 'VOIDED' }, createdAt: dateFilter },
       include: { items: { include: { product: true } } },
     });
 
@@ -57,6 +57,7 @@ export class FinanceService {
       where: {
         tenantId,
         ncfType: NcfType.CREDITO_FISCAL,
+        status: { not: 'VOIDED' },
         createdAt: dateFilter,
       },
       include: { items: true },

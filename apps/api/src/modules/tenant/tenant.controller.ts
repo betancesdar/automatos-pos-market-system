@@ -7,6 +7,10 @@ class UpdateTenantDto {
   rnc?: string;
   phone?: string;
   address?: string;
+  commercialName?: string;
+  receiptLogoUrl?: string;
+  receiptFooter?: string;
+  paperSize?: string;
   ncfSequences?: { type: NcfType; prefix: string; nextValue: number }[];
 }
 

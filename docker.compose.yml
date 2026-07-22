@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: admin
       POSTGRES_DB: minimarket
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - ./postgres:/var/lib/postgresql/data
     restart: always

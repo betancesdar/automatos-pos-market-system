@@ -1,5 +1,7 @@
 import { Controller, Get, Param, Query, Post, Put, Delete, Body } from '@nestjs/common';
 import { CatalogService } from './catalog.service';
+import { CreateProductDto } from './dto/create-product.dto';
+import { UpdateProductDto } from './dto/update-product.dto';
 
 @Controller('catalog')
 export class CatalogController {
@@ -15,8 +17,9 @@ export class CatalogController {
     @Query('tenantId') tenantId: string,
     @Query('category') category?: string,
     @Query('search') search?: string,
+    @Query('categoryId') categoryId?: string,
   ) {
-    return this.catalogService.listProducts(tenantId, category, search);
+    return this.catalogService.listProducts(tenantId, category, search, categoryId);
   }
 
   @Get('scan/:barcode')
@@ -26,18 +29,7 @@ export class CatalogController {
   }
 
   @Post('product')
-  addProduct(
-    @Query('tenantId') tenantId: string,
-    @Body() body: {
-      barcode?: string;
-      name: string;
-      price: number;
-      cost?: number;
-      stock?: number;
-      categoryId?: string;
-      imageUrl?: string;
-    },
-  ) {
+  addProduct(@Query('tenantId') tenantId: string, @Body() body: CreateProductDto) {
     return this.catalogService.addProduct(tenantId, body);
   }
 
@@ -45,15 +37,7 @@ export class CatalogController {
   updateProduct(
     @Query('tenantId') tenantId: string,
     @Param('id') id: string,
-    @Body() body: Partial<{
-      barcode: string;
-      name: string;
-      price: number;
-      cost: number;
-      stock: number;
-      categoryId: string;
-      imageUrl: string;
-    }>,
+    @Body() body: UpdateProductDto,
   ) {
     return this.catalogService.updateProduct(tenantId, id, body);
   }

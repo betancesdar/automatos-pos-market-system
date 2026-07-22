@@ -1,6 +1,7 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { NcfType, PaymentMethod } from '@prisma/client';
+import { NcfType, PaymentMethod, Prisma } from '@prisma/client';
+import { buildSaleReceipt } from '../../common/escpos.util';
 
 const ITBIS_RATE = 0.18;
 
@@ -24,15 +25,35 @@ interface CheckoutData {
   ncfType: NcfType;
   applyItbis?: boolean;
   clientRnc?: string;
+  clientName?: string;
   paymentMethod?: PaymentMethod;
   discountAmount?: number;
+}
+
+interface ListSalesFilters {
+  search?: string;
+  from?: string;
+  to?: string;
+  status?: string;
+  limit?: number;
 }
 
 @Injectable()
 export class SalesService {
   constructor(private prisma: PrismaService) {}
 
-  async checkout(tenantId: string, data: CheckoutData) {
+  async checkout(tenantId: string, data: CheckoutData, userId: string) {
+    // ── Cash Register Audit: a checkout can only happen inside an OPEN cash session ──
+    const openSession = await this.prisma.cashSession.findFirst({
+      where: { tenantId, userId, status: 'OPEN' },
+      orderBy: { openedAt: 'desc' },
+    });
+    if (!openSession) {
+      throw new BadRequestException(
+        'No hay una caja abierta. Debes realizar la Apertura de Caja antes de vender.',
+      );
+    }
+
     return this.prisma.$transaction(async (tx) => {
       let subtotal = 0;
       const saleItemsData: {
@@ -105,6 +126,10 @@ export class SalesService {
         }
       }
 
+      // Sequential per-tenant invoice number (e.g. INV-00001).
+      const saleCount = await tx.sale.count({ where: { tenantId } });
+      const invoiceNumber = `INV-${String(saleCount + 1).padStart(5, '0')}`;
+
       let ncf: string | null = null;
       if (NCF_GENERATING_TYPES.includes(data.ncfType)) {
         const seq = await tx.nCFSequence.findUnique({
@@ -122,6 +147,7 @@ export class SalesService {
       const sale = await tx.sale.create({
         data: {
           tenantId,
+          invoiceNumber,
           subtotal,
           total,
           cashReceived,
@@ -129,62 +155,108 @@ export class SalesService {
           ncf,
           ncfType: data.ncfType,
           clientRnc: data.clientRnc?.replace(/\D/g, '') || null,
+          clientName: data.clientName?.trim() || null,
           itbis,
           applyItbis: shouldApplyItbis,
           paymentMethod,
+          status: 'COMPLETED',
+          cashSessionId: openSession.id,
           items: { create: saleItemsData },
         },
         include: { items: { include: { product: true } }, tenant: true },
       });
 
-      const receiptRaw = this.generateEscPosReceipt(sale);
+      const receiptRaw = buildSaleReceipt(sale);
       return { sale, receiptRaw };
     });
   }
 
-  private generateEscPosReceipt(sale: any): string {
-    const ESC = '\x1b';
-    const GS = '\x1d';
-    const INIT = `${ESC}@`;
-    const ALIGN_CENTER = `${ESC}a1`;
-    const ALIGN_LEFT = `${ESC}a0`;
-    const BOLD_ON = `${ESC}E1`;
-    const BOLD_OFF = `${ESC}E0`;
-    const DOUBLE_HEIGHT = `${GS}!\x11`;
-    const NORMAL_SIZE = `${GS}!\x00`;
-    const CUT_PAPER = `${GS}V\x41\x03`;
-    const OPEN_DRAWER = `${ESC}p0\x19\xFA`;
+  /** Lists invoices/sales for the admin dashboard, with search + date range filters. */
+  async listSales(tenantId: string, filters: ListSalesFilters = {}) {
+    const where: Prisma.SaleWhereInput = { tenantId };
 
-    let receipt = '';
-    receipt += INIT + ALIGN_CENTER + BOLD_ON + DOUBLE_HEIGHT;
-    receipt += `${sale.tenant.name}\n`;
-    receipt += NORMAL_SIZE + BOLD_OFF;
-    if (sale.tenant.rnc) receipt += `RNC: ${sale.tenant.rnc}\n`;
-    receipt += '--------------------------------\n';
-    receipt += `NCF: ${sale.ncf || 'N/A'}\n`;
-    receipt += `Tipo: ${sale.ncfType}\n`;
-    if (sale.clientRnc) receipt += `Cliente RNC: ${sale.clientRnc}\n`;
-    if (sale.applyItbis) receipt += `ITBIS: RD$ ${sale.itbis.toFixed(2)}\n`;
-    receipt += `Pago: ${sale.paymentMethod}\n`;
-    receipt += `Fecha: ${sale.createdAt.toLocaleString()}\n`;
-    receipt += '--------------------------------\n';
-    receipt += ALIGN_LEFT + 'Cant   Descripcion        Importe\n';
-
-    for (const item of sale.items) {
-      const name = item.product.name.substring(0, 16).padEnd(16, ' ');
-      const qty = item.quantity.toFixed(2).padEnd(4, ' ');
-      const price = (item.price * item.quantity).toFixed(2).padStart(8, ' ');
-      receipt += `${qty} ${name} ${price}\n`;
+    if (filters.status && filters.status !== 'ALL') {
+      where.status = filters.status;
     }
 
-    receipt += '--------------------------------\n' + ALIGN_CENTER + DOUBLE_HEIGHT + BOLD_ON;
-    receipt += `TOTAL: RD$ ${sale.total.toFixed(2)}\n`;
-    receipt += NORMAL_SIZE + BOLD_OFF + ALIGN_LEFT;
-    receipt += `Recibido: RD$ ${sale.cashReceived.toFixed(2)}\n`;
-    receipt += `Devuelta: RD$ ${sale.changeDue.toFixed(2)}\n\n`;
-    receipt += ALIGN_CENTER + 'GRACIAS POR SU COMPRA\n';
-    receipt += OPEN_DRAWER + CUT_PAPER;
+    if (filters.from || filters.to) {
+      where.createdAt = {};
+      if (filters.from) (where.createdAt as Prisma.DateTimeFilter).gte = new Date(filters.from);
+      if (filters.to) {
+        const end = new Date(filters.to);
+        end.setHours(23, 59, 59, 999);
+        (where.createdAt as Prisma.DateTimeFilter).lte = end;
+      }
+    }
 
-    return Buffer.from(receipt, 'ascii').toString('base64');
+    const search = filters.search?.trim();
+    if (search) {
+      where.OR = [
+        { invoiceNumber: { contains: search, mode: 'insensitive' } },
+        { ncf: { contains: search, mode: 'insensitive' } },
+        { clientName: { contains: search, mode: 'insensitive' } },
+        { clientRnc: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const sales = await this.prisma.sale.findMany({
+      where,
+      include: { items: { include: { product: { select: { name: true } } } } },
+      orderBy: { createdAt: 'desc' },
+      take: filters.limit && filters.limit > 0 ? Math.min(filters.limit, 500) : 200,
+    });
+
+    return sales;
+  }
+
+  async getSale(tenantId: string, saleId: string) {
+    const sale = await this.prisma.sale.findFirst({
+      where: { id: saleId, tenantId },
+      include: { items: { include: { product: { select: { name: true } } } }, tenant: true },
+    });
+    if (!sale) throw new NotFoundException('Factura no encontrada');
+    return sale;
+  }
+
+  /**
+   * Voids a sale (Anular Factura): flips status to VOIDED, restores stock
+   * for every non-loose item, and records the reason + timestamp.
+   */
+  async voidSale(tenantId: string, saleId: string, voidReason: string) {
+    const reason = voidReason?.trim();
+    if (!reason) {
+      throw new BadRequestException('Debe indicar el motivo de la anulación');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const sale = await tx.sale.findFirst({
+        where: { id: saleId, tenantId },
+        include: { items: true },
+      });
+      if (!sale) throw new NotFoundException('Factura no encontrada');
+      if (sale.status === 'VOIDED') {
+        throw new BadRequestException('Esta factura ya fue anulada');
+      }
+
+      // Restore stock for physical (non-loose) items.
+      for (const item of sale.items) {
+        if (!item.isLoose && item.quantity > 0) {
+          await tx.product.update({
+            where: { id: item.productId },
+            data: { stock: { increment: Math.ceil(item.quantity) } },
+          });
+        }
+      }
+
+      return tx.sale.update({
+        where: { id: sale.id },
+        data: {
+          status: 'VOIDED',
+          voidedAt: new Date(),
+          voidReason: reason,
+        },
+        include: { items: { include: { product: { select: { name: true } } } } },
+      });
+    });
   }
 }

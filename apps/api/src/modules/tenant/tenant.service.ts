@@ -14,8 +14,14 @@ interface UpdateTenantInput {
   rnc?: string;
   phone?: string;
   address?: string;
+  commercialName?: string;
+  receiptLogoUrl?: string;
+  receiptFooter?: string;
+  paperSize?: string;
   ncfSequences?: NcfSequenceInput[];
 }
+
+const VALID_PAPER_SIZES = ['58mm', '80mm'];
 
 @Injectable()
 export class TenantService {
@@ -37,6 +43,9 @@ export class TenantService {
     if (data.rnc && !validateRnc(data.rnc)) {
       throw new BadRequestException('RNC must be 9 or 11 digits');
     }
+    if (data.paperSize && !VALID_PAPER_SIZES.includes(data.paperSize)) {
+      throw new BadRequestException('paperSize must be one of: ' + VALID_PAPER_SIZES.join(', '));
+    }
 
     return this.prisma.$transaction(async (tx) => {
       await tx.tenant.update({
@@ -46,6 +55,10 @@ export class TenantService {
           rnc: data.rnc?.replace(/\D/g, '') || data.rnc,
           phone: data.phone,
           address: data.address,
+          commercialName: data.commercialName,
+          receiptLogoUrl: data.receiptLogoUrl,
+          receiptFooter: data.receiptFooter,
+          paperSize: data.paperSize,
         },
       });
 

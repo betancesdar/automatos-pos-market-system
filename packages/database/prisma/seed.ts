@@ -28,12 +28,19 @@ const categoryDefs = [
   { name: 'Otros', slug: 'OTROS' },
 ]
 
+const ProductType = { PRODUCT: 'PRODUCT', SERVICE: 'SERVICE', COMBO: 'COMBO' } as const
+
+// finalPrice = basePrice * (1 + taxPercentage/100)
+function finalPrice(basePrice: number, taxPercentage: number): number {
+  return parseFloat((basePrice * (1 + taxPercentage / 100)).toFixed(2))
+}
+
 const demoProducts = [
-  { barcode: '7460111111111', name: 'Refresco Imperio Rojo 500ml', slug: 'BEBIDAS', price: 25, cost: 15, stock: 100, imageUrl: 'https://images.unsplash.com/photo-1622484214627-4474bfb984ba?w=200&h=200&fit=crop' },
-  { barcode: '7460222222222', name: 'Salami Super Especial Induveca', slug: 'ALIMENTOS', price: 150, cost: 110, stock: 50 },
-  { barcode: '7460333333333', name: 'Ron Brugal Añejo 700ml', slug: 'BEBIDAS', price: 550, cost: 400, stock: 20 },
-  { barcode: '7460444444444', name: 'Jugo Rica Naranja 1L', slug: 'BEBIDAS', price: 80, cost: 60, stock: 40 },
-  { barcode: '7460555555555', name: 'Cerveza Presidente Grande', slug: 'BEBIDAS', price: 180, cost: 130, stock: 200 },
+  { barcode: '7460111111111', sku: 'REFIMP-0001', name: 'Refresco Imperio Rojo 500ml', slug: 'BEBIDAS', type: ProductType.PRODUCT, uom: 'Unidad', basePrice: 25, taxPercentage: 18, cost: 15, stock: 100, imageUrl: 'https://images.unsplash.com/photo-1622484214627-4474bfb984ba?w=200&h=200&fit=crop' },
+  { barcode: '7460222222222', sku: 'SALIND-0002', name: 'Salami Super Especial Induveca', slug: 'ALIMENTOS', type: ProductType.PRODUCT, uom: 'Libra', basePrice: 150, taxPercentage: 18, cost: 110, stock: 50 },
+  { barcode: '7460333333333', sku: 'RONBRU-0003', name: 'Ron Brugal Añejo 700ml', slug: 'BEBIDAS', type: ProductType.PRODUCT, uom: 'Unidad', basePrice: 550, taxPercentage: 18, cost: 400, stock: 20 },
+  { barcode: '7460444444444', sku: 'JUGRIC-0004', name: 'Jugo Rica Naranja 1L', slug: 'BEBIDAS', type: ProductType.PRODUCT, uom: 'Unidad', basePrice: 80, taxPercentage: 18, cost: 60, stock: 40 },
+  { barcode: '7460555555555', sku: 'CERPRE-0005', name: 'Cerveza Presidente Grande', slug: 'BEBIDAS', type: ProductType.PRODUCT, uom: 'Unidad', basePrice: 180, taxPercentage: 18, cost: 130, stock: 200 },
 ]
 
 async function ensureDemoTenantData(tenantId: string) {
@@ -49,16 +56,35 @@ async function ensureDemoTenantData(tenantId: string) {
 
   for (const p of demoProducts) {
     const { slug, ...rest } = p
+    const price = finalPrice(rest.basePrice, rest.taxPercentage)
     const existingProduct = p.barcode
       ? await prisma.product.findUnique({ where: { barcode_tenantId: { barcode: p.barcode, tenantId } } })
       : null
     if (existingProduct) {
       await prisma.product.update({
         where: { id: existingProduct.id },
-        data: { categoryId: catMap[slug], imageUrl: rest.imageUrl ?? existingProduct.imageUrl },
+        data: {
+          categoryId: catMap[slug],
+          imageUrl: rest.imageUrl ?? existingProduct.imageUrl,
+          sku: existingProduct.sku ?? rest.sku,
+          type: rest.type,
+          uom: rest.uom,
+          basePrice: rest.basePrice,
+          taxPercentage: rest.taxPercentage,
+          taxType: 'ITBIS',
+          price,
+        },
       })
     } else {
-      await prisma.product.create({ data: { ...rest, categoryId: catMap[slug], tenantId } })
+      await prisma.product.create({
+        data: {
+          ...rest,
+          taxType: 'ITBIS',
+          price,
+          categoryId: catMap[slug],
+          tenantId,
+        },
+      })
     }
   }
   console.log('✅  Categories and demo products synced')

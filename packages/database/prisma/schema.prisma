@@ -10,16 +10,21 @@ datasource db {
 }
 
 model Tenant {
-  id        String   @id @default(uuid())
-  name      String
-  rnc       String   @unique
-  phone     String?
-  address   String?
-  isActive  Boolean  @default(true)
-  plan      String   @default("BASIC")
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             String   @id @default(uuid())
+  name           String
+  rnc            String   @unique
+  phone          String?
+  address        String?
+  isActive       Boolean  @default(true)
+  plan           String   @default("BASIC")
+  expiresAt      DateTime
+  // Thermal receipt configuration
+  receiptLogoUrl String?
+  commercialName String?
+  receiptFooter  String?
+  paperSize      String   @default("80mm")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   users          User[]
   categories     Category[]
@@ -27,6 +32,8 @@ model Tenant {
   sales          Sale[]
   ncfSequences   NCFSequence[]
   cashDrawerLogs CashDrawerLog[]
+  cashSessions   CashSession[]
+  cashMovements  CashMovement[]
 }
 
 model User {
@@ -38,6 +45,8 @@ model User {
   tenantId  String?
   tenant    Tenant?  @relation(fields: [tenantId], references: [id])
   createdAt DateTime @default(now())
+
+  cashSessions CashSession[]
 }
 
 enum Role {
@@ -47,34 +56,50 @@ enum Role {
 }
 
 model Category {
-  id        String    @id @default(uuid())
-  name      String
-  slug      String
-  tenantId  String
-  tenant    Tenant    @relation(fields: [tenantId], references: [id])
-  products  Product[]
-  createdAt DateTime  @default(now())
+  id          String    @id @default(uuid())
+  name        String
+  slug        String
+  description String?
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  products    Product[]
+  createdAt   DateTime  @default(now())
 
   @@unique([slug, tenantId])
 }
 
 model Product {
-  id         String     @id @default(uuid())
-  barcode    String?
-  name       String
-  price      Float
-  cost       Float
-  stock      Int        @default(0)
-  imageUrl   String?
-  categoryId String?
-  category   Category?  @relation(fields: [categoryId], references: [id])
-  tenantId   String
-  tenant     Tenant     @relation(fields: [tenantId], references: [id])
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
-  saleItems  SaleItem[]
+  id            String      @id @default(uuid())
+  barcode       String?
+  sku           String?
+  name          String
+  description   String?
+  type          ProductType @default(PRODUCT)
+  hasVariants   Boolean     @default(false)
+  uom           String?     @default("Unidad")
+  basePrice     Float       @default(0)
+  taxPercentage Float       @default(18)
+  taxType       String      @default("ITBIS")
+  price         Float // Final (tax-inclusive) selling price = basePrice * (1 + taxPercentage/100)
+  cost          Float
+  stock         Int         @default(0)
+  imageUrl      String?
+  categoryId    String?
+  category      Category?   @relation(fields: [categoryId], references: [id])
+  tenantId      String
+  tenant        Tenant      @relation(fields: [tenantId], references: [id])
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  saleItems     SaleItem[]
 
   @@unique([barcode, tenantId])
+  @@unique([sku, tenantId])
+}
+
+enum ProductType {
+  PRODUCT
+  SERVICE
+  COMBO
 }
 
 model NCFSequence {
@@ -92,6 +117,7 @@ model NCFSequence {
 
 model Sale {
   id            String        @id @default(uuid())
+  invoiceNumber String?
   total         Float
   subtotal      Float         @default(0)
   cashReceived  Float?
@@ -99,13 +125,56 @@ model Sale {
   ncf           String?
   ncfType       NcfType       @default(VENTA_RAPIDA)
   clientRnc     String?
+  clientName    String?
   itbis         Float         @default(0)
   applyItbis    Boolean       @default(false)
   paymentMethod PaymentMethod @default(CASH)
+  status        String        @default("COMPLETED")
+  voidedAt      DateTime?
+  voidReason    String?
   tenantId      String
   tenant        Tenant        @relation(fields: [tenantId], references: [id])
+  cashSessionId String?
+  cashSession   CashSession?  @relation(fields: [cashSessionId], references: [id])
   createdAt     DateTime      @default(now())
   items         SaleItem[]
+
+  @@unique([invoiceNumber, tenantId])
+  @@index([tenantId, status])
+}
+
+model CashSession {
+  id                     String         @id @default(uuid())
+  tenantId               String
+  tenant                 Tenant         @relation(fields: [tenantId], references: [id])
+  userId                 String
+  user                   User           @relation(fields: [userId], references: [id])
+  openedAt               DateTime       @default(now())
+  closedAt               DateTime?
+  openingBalance         Float
+  expectedClosingBalance Float?
+  actualClosingBalance   Float?
+  status                 String         @default("OPEN")
+  createdAt              DateTime       @default(now())
+  sales                  Sale[]
+  movements              CashMovement[]
+
+  @@index([tenantId, userId, status])
+}
+
+model CashMovement {
+  id            String      @id @default(uuid())
+  cashSessionId String
+  cashSession   CashSession @relation(fields: [cashSessionId], references: [id])
+  tenantId      String
+  tenant        Tenant      @relation(fields: [tenantId], references: [id])
+  type          String // "INFLOW" | "OUTFLOW"
+  amount        Float
+  reason        String
+  createdAt     DateTime    @default(now())
+
+  @@index([cashSessionId])
+  @@index([tenantId, createdAt])
 }
 
 model SaleItem {

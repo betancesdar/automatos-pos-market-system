@@ -29,12 +29,15 @@ function parseError(data: Record<string, unknown>): string {
 }
 
 async function handleResponse<T>(res: Response): Promise<T> {
-  const data = await res.json();
+  // Some endpoints (e.g. a controller returning `null`) yield an empty body,
+  // which would throw on JSON.parse. Treat empty bodies as `null`.
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
   if (!res.ok) {
-    if (res.status === 403 && data.code === LICENSE_BLOCKED_CODE) {
+    if (res.status === 403 && data?.code === LICENSE_BLOCKED_CODE) {
       throw new LicenseBlockedError(parseError(data));
     }
-    throw new Error(parseError(data));
+    throw new Error(parseError(data ?? {}));
   }
   return data as T;
 }

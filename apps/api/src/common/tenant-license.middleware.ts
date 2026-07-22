@@ -9,11 +9,14 @@ import { LICENSE_BLOCKED_MESSAGE } from '../common/jwt.util';
 
 const LICENSE_PROTECTED_PREFIXES = [
   '/catalog',
+  '/categories',
   '/sales',
   '/finance',
   '/analytics',
   '/users',
   '/tenant',
+  '/cash-sessions',
+  '/reports',
 ];
 
 @Injectable()

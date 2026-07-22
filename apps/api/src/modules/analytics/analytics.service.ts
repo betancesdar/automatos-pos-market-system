@@ -13,7 +13,7 @@ export class AnalyticsService {
 
     const saleItems = await this.prisma.saleItem.findMany({
       where: {
-        sale: { tenantId, ...(dateFilter && { createdAt: dateFilter }) },
+        sale: { tenantId, status: { not: 'VOIDED' }, ...(dateFilter && { createdAt: dateFilter }) },
       },
       include: { product: true },
     });
@@ -55,7 +55,7 @@ export class AnalyticsService {
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
     const sales = await this.prisma.sale.findMany({
-      where: { tenantId, createdAt: { gte: thirtyDaysAgo } },
+      where: { tenantId, status: { not: 'VOIDED' }, createdAt: { gte: thirtyDaysAgo } },
       select: { createdAt: true, total: true },
     });
 
@@ -93,7 +93,7 @@ export class AnalyticsService {
     const [products, saleItems] = await Promise.all([
       this.prisma.product.findMany({ where: { tenantId } }),
       this.prisma.saleItem.findMany({
-        where: { sale: { tenantId, createdAt: { gte: sevenDaysAgo } } },
+        where: { sale: { tenantId, status: { not: 'VOIDED' }, createdAt: { gte: sevenDaysAgo } } },
         include: { product: true },
       }),
     ]);

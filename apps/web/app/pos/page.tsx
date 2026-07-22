@@ -5,12 +5,15 @@ import { useRouter } from 'next/navigation';
 import { BarcodeScanner } from '../../components/BarcodeScanner';
 import { ReceiptPrinter } from '../../components/ReceiptPrinter';
 import { QuickAddProductModal } from '../../components/QuickAddProductModal';
+import { OpenCashSessionModal } from '../../components/pos/OpenCashSessionModal';
+import { CloseCashSessionModal } from '../../components/pos/CloseCashSessionModal';
 import { useAuth } from '../../lib/auth-context';
 import { apiFetch, LicenseBlockedError } from '../../lib/api';
 import {
-  POS_CATEGORY_TABS,
   RECEIPT_TYPES,
   type CartLine,
+  type CashSession,
+  type Category,
   type PosProduct,
   type ReceiptTypeValue,
   lineTotal,
@@ -54,6 +57,7 @@ export default function POSPage() {
   const clientRncRef = useRef<HTMLInputElement>(null);
 
   const [products, setProducts] = useState<PosProduct[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [activeCategory, setActiveCategory] = useState('TODOS');
   const [search, setSearch] = useState('');
@@ -78,6 +82,10 @@ export default function POSPage() {
   const [discountAmount, setDiscountAmount] = useState(0);
   const [lastSale, setLastSale] = useState<{ ncf?: string; total: number } | null>(null);
 
+  const [cashSession, setCashSession] = useState<CashSession | null>(null);
+  const [checkingSession, setCheckingSession] = useState(true);
+  const [showCloseSession, setShowCloseSession] = useState(false);
+
   const receiptConfig = RECEIPT_TYPES.find((r) => r.value === receiptType)!;
   const subtotal = cart.reduce((s, i) => s + lineTotal(i), 0);
   const netSubtotal = Math.max(0, parseFloat((subtotal - discountAmount).toFixed(2)));
@@ -89,7 +97,7 @@ export default function POSPage() {
     setLoadingProducts(true);
     try {
       const params = new URLSearchParams();
-      if (activeCategory !== 'TODOS') params.set('category', activeCategory);
+      if (activeCategory !== 'TODOS') params.set('categoryId', activeCategory);
       if (search.trim()) params.set('search', search.trim());
       const qs = params.toString();
       const data = await apiFetch<PosProduct[]>(
@@ -105,6 +113,33 @@ export default function POSPage() {
   }, [tenantId, activeCategory, search, setLicenseBlocked]);
 
   useEffect(() => { loadProducts(); }, [loadProducts]);
+
+  const loadCategories = useCallback(async () => {
+    if (!tenantId) return;
+    try {
+      const data = await apiFetch<Category[]>('/categories', tenantId);
+      setCategories(data);
+    } catch (err) {
+      if (err instanceof LicenseBlockedError) setLicenseBlocked(err.message);
+    }
+  }, [tenantId, setLicenseBlocked]);
+
+  useEffect(() => { loadCategories(); }, [loadCategories]);
+
+  const loadCashSession = useCallback(async () => {
+    if (!tenantId) return;
+    setCheckingSession(true);
+    try {
+      const session = await apiFetch<CashSession | null>('/cash-sessions/current', tenantId);
+      setCashSession(session);
+    } catch (err) {
+      if (err instanceof LicenseBlockedError) setLicenseBlocked(err.message);
+    } finally {
+      setCheckingSession(false);
+    }
+  }, [tenantId, setLicenseBlocked]);
+
+  useEffect(() => { loadCashSession(); }, [loadCashSession]);
 
   useEffect(() => {
     const cfg = RECEIPT_TYPES.find((r) => r.value === receiptType)!;
@@ -214,7 +249,11 @@ export default function POSPage() {
       loadProducts();
     } catch (err) {
       if (err instanceof LicenseBlockedError) setLicenseBlocked(err.message);
-      else setCheckoutError(err instanceof Error ? err.message : 'Error en facturación');
+      else {
+        const msg = err instanceof Error ? err.message : 'Error en facturación';
+        setCheckoutError(msg);
+        if (msg.toLowerCase().includes('caja')) loadCashSession();
+      }
     }
   };
 
@@ -269,6 +308,24 @@ export default function POSPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [cart, activeLineId, discountAmount]);
 
+  if (checkingSession) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-100 font-sans text-slate-400">
+        Verificando estado de caja…
+      </div>
+    );
+  }
+
+  if (!cashSession) {
+    return (
+      <OpenCashSessionModal
+        tenantId={tenantId}
+        cashierName={user?.name}
+        onOpened={(session) => setCashSession(session)}
+      />
+    );
+  }
+
   return (
     <div className="flex h-screen flex-col bg-slate-100 font-sans text-slate-900">
       <BarcodeScanner onScan={handleScan} />
@@ -278,6 +335,13 @@ export default function POSPage() {
           const p = await apiFetch<PosProduct>('/catalog/product', tenantId, { method: 'POST', body: JSON.stringify(d) });
           addToCart(p); setModalOpen(false); loadProducts();
         }} />
+      <CloseCashSessionModal
+        isOpen={showCloseSession}
+        tenantId={tenantId}
+        session={cashSession}
+        onClose={() => setShowCloseSession(false)}
+        onClosed={() => { setShowCloseSession(false); setCashSession(null); }}
+      />
 
       {/* Top bar */}
       <header className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-5 py-3 shadow-sm">
@@ -294,6 +358,9 @@ export default function POSPage() {
           </div>
         )}
         <div className="flex gap-2">
+          <button onClick={() => setShowCloseSession(true)} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-800 hover:bg-amber-100">
+            🔒 Cerrar Caja
+          </button>
           {user?.role === 'ADMIN' && (
             <button onClick={() => router.push('/admin')} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm hover:bg-slate-50">Admin</button>
           )}
@@ -316,19 +383,30 @@ export default function POSPage() {
             />
           </div>
 
-          {/* Category tabs */}
+          {/* Category tabs (dynamic from DB) */}
           <div className="flex gap-1 overflow-x-auto border-b border-slate-200 bg-white px-4 py-2">
-            {POS_CATEGORY_TABS.map((tab) => (
+            <button
+              key="TODOS"
+              onClick={() => setActiveCategory('TODOS')}
+              className={`shrink-0 rounded-lg px-4 py-2 text-xs font-bold uppercase tracking-wide transition-colors ${
+                activeCategory === 'TODOS'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              Todos
+            </button>
+            {categories.map((cat) => (
               <button
-                key={tab.slug}
-                onClick={() => setActiveCategory(tab.slug)}
-                className={`shrink-0 rounded-lg px-4 py-2 text-xs font-bold tracking-wide transition-colors ${
-                  activeCategory === tab.slug
+                key={cat.id}
+                onClick={() => setActiveCategory(cat.id)}
+                className={`shrink-0 rounded-lg px-4 py-2 text-xs font-bold uppercase tracking-wide transition-colors ${
+                  activeCategory === cat.id
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
-                {tab.label}
+                {cat.name}
               </button>
             ))}
           </div>
