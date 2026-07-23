@@ -24,6 +24,8 @@ interface Product {
   price: number;
   cost: number;
   stock: number;
+  quantityMin?: number;
+  quantityMax?: number | null;
   imageUrl: string | null;
   categoryId?: string | null;
   category?: { id: string; name: string; slug: string } | null;
@@ -45,6 +47,8 @@ interface ProductForm {
   taxType: string;
   cost: number;
   stock: number;
+  quantityMin: number;
+  quantityMax: number;
   imageUrl: string;
   categoryId: string;
 }
@@ -63,6 +67,8 @@ const emptyProduct: ProductForm = {
   taxType: 'ITBIS',
   cost: 0,
   stock: 0,
+  quantityMin: 0,
+  quantityMax: 0,
   imageUrl: '',
   categoryId: '',
 };
@@ -153,6 +159,8 @@ export default function InventoryPage() {
       taxType: p.taxType ?? 'ITBIS',
       cost: p.cost,
       stock: p.stock,
+      quantityMin: p.quantityMin ?? 0,
+      quantityMax: p.quantityMax ?? 0,
       imageUrl: p.imageUrl ?? '',
       categoryId: p.categoryId ?? p.category?.id ?? '',
     });
@@ -178,6 +186,8 @@ export default function InventoryPage() {
         taxType: productForm.taxType,
         cost: productForm.cost,
         stock: productForm.stock,
+        quantityMin: productForm.quantityMin,
+        quantityMax: productForm.quantityMax,
         categoryId: productForm.categoryId || undefined,
         imageUrl: productForm.imageUrl || undefined,
       });
@@ -627,11 +637,31 @@ function ProductFormModal({
                     <p className="mt-1 text-xs text-slate-400">Margen: <span className={margin >= 0 ? 'text-emerald-600' : 'text-red-600'}>{margin.toFixed(1)}%</span></p>
                   )}
                 </div>
-                <div>
-                  <label className={labelCls}>{form.type === 'SERVICE' ? 'Disponibilidad' : 'Stock'}</label>
-                  <input type="number" min="0" value={form.stock} disabled={form.type === 'SERVICE'}
-                    onChange={(e) => setForm({ ...form, stock: parseInt(e.target.value) || 0 })}
-                    className={inputCls + (form.type === 'SERVICE' ? ' opacity-50' : '')} />
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 sm:col-span-2">
+                  <div className="mb-3 flex items-center justify-between">
+                    <label className={labelCls + ' mb-0'}>Detalles de inventario</label>
+                    <span className="text-[11px] text-slate-400">Límites operativos</span>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Cantidad inicial</label>
+                      <input type="number" min="0" value={form.stock} disabled={form.type === 'SERVICE'}
+                        onChange={(e) => setForm({ ...form, stock: parseInt(e.target.value) || 0 })}
+                        className={inputCls + (form.type === 'SERVICE' ? ' opacity-50' : '')} />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Cantidad mínima</label>
+                      <input type="number" min="0" step="0.01" value={form.quantityMin} disabled={form.type === 'SERVICE'}
+                        onChange={(e) => setForm({ ...form, quantityMin: parseFloat(e.target.value) || 0 })}
+                        className={inputCls + (form.type === 'SERVICE' ? ' opacity-50' : '')} />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Cantidad máxima</label>
+                      <input type="number" min="0" step="0.01" value={form.quantityMax} disabled={form.type === 'SERVICE'}
+                        onChange={(e) => setForm({ ...form, quantityMax: parseFloat(e.target.value) || 0 })}
+                        className={inputCls + (form.type === 'SERVICE' ? ' opacity-50' : '')} />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

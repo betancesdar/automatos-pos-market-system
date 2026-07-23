@@ -58,6 +58,8 @@ interface SaleReceiptData {
   total: number;
   cashReceived: number | null;
   changeDue: number | null;
+  totalReceived: number;
+  totalChange: number;
 }
 
 /**
@@ -68,9 +70,13 @@ export function buildSaleReceipt(sale: SaleReceiptData): string {
   const width = paperCharWidth(sale.tenant.paperSize);
   let receipt = escPosHeader(sale.tenant);
 
-  receipt += `NCF: ${sale.ncf || 'N/A'}\n`;
-  receipt += `Tipo: ${sale.ncfType}\n`;
-  if (sale.clientRnc) receipt += `Cliente RNC: ${sale.clientRnc}\n`;
+  // Fiscal data is strictly optional. Regular/quick sales do not print an
+  // empty NCF block, preventing misleading "N/A" fiscal receipts.
+  if (sale.ncf) {
+    receipt += `NCF: ${sale.ncf}\n`;
+    receipt += `Tipo: ${sale.ncfType}\n`;
+    if (sale.clientRnc) receipt += `Cliente RNC: ${sale.clientRnc}\n`;
+  }
   if (sale.applyItbis) receipt += `ITBIS: RD$ ${sale.itbis.toFixed(2)}\n`;
   receipt += `Pago: ${sale.paymentMethod}\n`;
   receipt += `Fecha: ${sale.createdAt.toLocaleString('es-DO')}\n`;
@@ -87,8 +93,8 @@ export function buildSaleReceipt(sale: SaleReceiptData): string {
   receipt += '-'.repeat(width) + '\n' + `${ESC}a1${GS}!\x11${ESC}E1`;
   receipt += `TOTAL: RD$ ${sale.total.toFixed(2)}\n`;
   receipt += `${GS}!\x00${ESC}E0${ESC}a0`;
-  if (sale.cashReceived != null) receipt += `Recibido: RD$ ${sale.cashReceived.toFixed(2)}\n`;
-  if (sale.changeDue != null) receipt += `Devuelta: RD$ ${sale.changeDue.toFixed(2)}\n`;
+  receipt += `Total recibido: RD$ ${sale.totalReceived.toFixed(2)}\n`;
+  receipt += `Cambio/Devuelto: RD$ ${sale.totalChange.toFixed(2)}\n`;
 
   receipt += escPosFooter(sale.tenant);
   return encodeEscPos(receipt);

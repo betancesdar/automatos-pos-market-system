@@ -18,20 +18,22 @@ import { Public, JwtAuthGuard } from '../../common/auth.guard';
 import { COOKIE_NAMES } from '../../common/jwt.util';
 
 class LoginDto {
-  email: string;
+  identifier: string;
   password: string;
 }
 
 class CreateUserDto {
   name: string;
-  email: string;
+  username: string;
+  email?: string;
   password: string;
   role: Role;
 }
 
 class UpdateUserDto {
   name?: string;
-  email?: string;
+  username?: string;
+  email?: string | null;
   password?: string;
   role?: Role;
 }
@@ -54,7 +56,7 @@ export class AuthController {
   @Public()
   @Post('login')
   async login(@Body() body: LoginDto, @Res({ passthrough: true }) res: Response) {
-    const { user, token } = await this.authService.login(body.email, body.password);
+    const { user, token } = await this.authService.login(body.identifier, body.password);
 
     res.cookie(COOKIE_NAMES.accessToken, token, cookieOptions());
     if (user.tenantId) {

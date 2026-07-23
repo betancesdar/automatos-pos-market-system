@@ -80,7 +80,12 @@ export default function POSPage() {
   const [discountMode, setDiscountMode] = useState<'fixed' | 'percent'>('fixed');
   const [discountInput, setDiscountInput] = useState('');
   const [discountAmount, setDiscountAmount] = useState(0);
-  const [lastSale, setLastSale] = useState<{ ncf?: string; total: number } | null>(null);
+  const [lastSale, setLastSale] = useState<{
+    ncf?: string | null;
+    total: number;
+    totalReceived: number;
+    totalChange: number;
+  } | null>(null);
 
   const [cashSession, setCashSession] = useState<CashSession | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
@@ -91,6 +96,8 @@ export default function POSPage() {
   const netSubtotal = Math.max(0, parseFloat((subtotal - discountAmount).toFixed(2)));
   const itbisAmount = applyItbis ? parseFloat((netSubtotal - netSubtotal / 1.18).toFixed(2)) : 0;
   const grandTotal = netSubtotal;
+  const previewReceived = paymentMethod === 'CASH' ? parseFloat(cashReceived) || 0 : grandTotal;
+  const previewChange = Math.max(0, previewReceived - grandTotal);
 
   const loadProducts = useCallback(async () => {
     if (!tenantId) return;
@@ -215,7 +222,10 @@ export default function POSPage() {
     }
 
     try {
-      const data = await apiFetch<{ receiptRaw?: string; sale: { ncf?: string; total: number } }>(
+      const data = await apiFetch<{
+        receiptRaw?: string;
+        sale: { ncf?: string | null; total: number; totalReceived: number; totalChange: number };
+      }>(
         '/sales/checkout', tenantId,
         {
           method: 'POST',
@@ -240,7 +250,12 @@ export default function POSPage() {
         await (window as any).printReceipt(data.receiptRaw);
       }
 
-      setLastSale({ ncf: data.sale.ncf, total: data.sale.total });
+      setLastSale({
+        ncf: data.sale.ncf,
+        total: data.sale.total,
+        totalReceived: data.sale.totalReceived,
+        totalChange: data.sale.totalChange,
+      });
       setCart([]);
       setDiscountAmount(0);
       setShowCheckout(false);
@@ -353,8 +368,11 @@ export default function POSPage() {
         </div>
         {lastSale && (
           <div className="rounded-lg bg-emerald-50 px-3 py-1.5 text-xs text-emerald-700">
-            Última venta RD$ {lastSale.total.toFixed(2)}
-            {lastSale.ncf && <span className="ml-2 font-mono">{lastSale.ncf}</span>}
+            <p>Última venta RD$ {lastSale.total.toFixed(2)}</p>
+            <p className="mt-0.5 text-[11px]">
+              Recibido: RD$ {lastSale.totalReceived.toFixed(2)} · Cambio: RD$ {lastSale.totalChange.toFixed(2)}
+            </p>
+            {lastSale.ncf && <p className="mt-0.5 font-mono text-[11px]">NCF: {lastSale.ncf}</p>}
           </div>
         )}
         <div className="flex gap-2">
@@ -656,13 +674,18 @@ export default function POSPage() {
                   <input type="number" step="0.01" autoFocus value={cashReceived}
                     onChange={(e) => setCashReceived(e.target.value)}
                     className="w-full rounded-xl border-2 border-emerald-300 px-4 py-3 text-2xl font-bold tabular-nums outline-none focus:border-emerald-500" />
-                  {parseFloat(cashReceived) > grandTotal && (
-                    <p className="mt-2 text-emerald-600 font-semibold">
-                      Devuelta: RD$ {(parseFloat(cashReceived) - grandTotal).toFixed(2)}
-                    </p>
-                  )}
                 </div>
               )}
+              <div className="grid grid-cols-2 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Total Recibido</p>
+                  <p className="mt-1 font-bold tabular-nums text-slate-800">RD$ {previewReceived.toFixed(2)}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Cambio / Devuelto</p>
+                  <p className="mt-1 font-bold tabular-nums text-emerald-600">RD$ {previewChange.toFixed(2)}</p>
+                </div>
+              </div>
               <div className="flex gap-3">
                 <button onClick={() => setShowCheckout(false)} className="flex-1 rounded-xl border border-slate-200 py-3 font-medium">
                   Cancelar

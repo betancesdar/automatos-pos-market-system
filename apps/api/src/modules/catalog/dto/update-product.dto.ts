@@ -20,6 +20,8 @@ export class UpdateProductDto implements Partial<CreateProductDto> {
 
   cost?: number;
   stock?: number;
+  quantityMin?: number;
+  quantityMax?: number | null;
   categoryId?: string;
   imageUrl?: string;
 }

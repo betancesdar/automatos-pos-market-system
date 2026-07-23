@@ -20,6 +20,8 @@ interface Sale {
   total: number;
   subtotal: number;
   itbis: number;
+  totalReceived: number;
+  totalChange: number;
   ncf: string | null;
   ncfType: string;
   clientRnc: string | null;
@@ -120,7 +122,7 @@ export default function SalesPage() {
         <div>
           <h1>Factura ${escapeHtml(sale.invoiceNumber ?? '')}</h1>
           <p class="muted">${formatDateTime(sale.createdAt)}</p>
-          ${sale.ncf ? `<p class="muted">NCF: ${escapeHtml(sale.ncf)}</p>` : ''}
+          ${sale.ncf ? `<p class="muted"><strong>Factura de Crédito Fiscal</strong><br />NCF: ${escapeHtml(sale.ncf)}</p>` : ''}
         </div>
         <div>
           <span class="badge ${sale.status === 'VOIDED' ? 'badge-red' : 'badge-green'}">
@@ -137,6 +139,8 @@ export default function SalesPage() {
         <div class="kpi"><div class="label">Subtotal</div><div class="value">${formatCurrency(sale.subtotal)}</div></div>
         <div class="kpi"><div class="label">ITBIS</div><div class="value">${formatCurrency(sale.itbis)}</div></div>
         <div class="kpi"><div class="label">Total</div><div class="value">${formatCurrency(sale.total)}</div></div>
+        <div class="kpi"><div class="label">Total Recibido</div><div class="value">${formatCurrency(sale.totalReceived)}</div></div>
+        <div class="kpi"><div class="label">Cambio / Devuelto</div><div class="value">${formatCurrency(sale.totalChange)}</div></div>
         <div class="kpi"><div class="label">Método de pago</div><div class="value">${PAYMENT_LABELS[sale.paymentMethod] ?? sale.paymentMethod}</div></div>
       </div>
       ${sale.status === 'VOIDED' ? `<p style="color:#991b1b;margin-top:16px;"><strong>Motivo de anulación:</strong> ${escapeHtml(sale.voidReason ?? '')}</p>` : ''}
@@ -295,6 +299,12 @@ export default function SalesPage() {
                   <strong>Anulada:</strong> {detail.voidReason} · {formatDateTime(detail.voidedAt)}
                 </div>
               )}
+              {detail.ncf && (
+                <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">Factura de Crédito Fiscal</p>
+                  <p className="mt-1 font-mono text-sm font-bold text-indigo-900">NCF: {detail.ncf}</p>
+                </div>
+              )}
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 text-left text-slate-500">
@@ -319,6 +329,8 @@ export default function SalesPage() {
                 <div className="flex justify-between"><span className="text-slate-500">Subtotal</span><span className="tabular-nums">{formatCurrency(detail.subtotal)}</span></div>
                 <div className="flex justify-between"><span className="text-slate-500">ITBIS</span><span className="tabular-nums">{formatCurrency(detail.itbis)}</span></div>
                 <div className="flex justify-between text-base font-bold"><span>Total</span><span className="tabular-nums">{formatCurrency(detail.total)}</span></div>
+                <div className="mt-2 flex justify-between border-t border-slate-100 pt-2"><span className="font-medium text-slate-600">Total Recibido</span><span className="font-semibold tabular-nums">{formatCurrency(detail.totalReceived)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-500">Cambio / Devuelto</span><span className="tabular-nums text-emerald-600">{formatCurrency(detail.totalChange)}</span></div>
               </div>
               <div className="flex gap-3 pt-2">
                 <button onClick={() => setDetail(null)} className="flex-1 rounded-lg border border-slate-300 py-2.5 font-medium text-slate-700 hover:bg-slate-50">Cerrar</button>

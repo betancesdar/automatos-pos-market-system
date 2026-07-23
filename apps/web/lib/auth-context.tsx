@@ -9,7 +9,7 @@ interface AuthContextValue {
   loading: boolean;
   licenseBlocked: boolean;
   licenseMessage: string;
-  login: (email: string, password: string) => Promise<AuthUser>;
+  login: (identifier: string, password: string) => Promise<AuthUser>;
   logout: () => Promise<void>;
   setLicenseBlocked: (message: string) => void;
 }
@@ -40,8 +40,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('unhandledrejection', handler);
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const session = await authLogin(email, password);
+  const login = useCallback(async (identifier: string, password: string) => {
+    const session = await authLogin(identifier, password);
     setUser(session);
     setLicenseBlockedState(false);
     return session;

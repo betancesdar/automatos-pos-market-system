@@ -152,6 +152,8 @@ export class SalesService {
           total,
           cashReceived,
           changeDue,
+          totalReceived: cashReceived,
+          totalChange: changeDue,
           ncf,
           ncfType: data.ncfType,
           clientRnc: data.clientRnc?.replace(/\D/g, '') || null,

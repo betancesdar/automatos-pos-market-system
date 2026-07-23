@@ -20,6 +20,7 @@ interface CreateTenantInput {
   address?: string;
   plan?: string;
   adminName: string;
+  adminUsername?: string;
   adminEmail: string;
   adminPassword: string;
 }
@@ -103,6 +104,9 @@ export class SuperadminService {
       const admin = await tx.user.create({
         data: {
           name: data.adminName.trim(),
+          // The provisioning UI may omit a username; derive a globally unique
+          // login from the email local-part and new tenant ID in that case.
+          username: (data.adminUsername?.trim() || `${data.adminEmail.split('@')[0]}-${tenant.id.slice(0, 6)}`).toLowerCase(),
           email: data.adminEmail.trim().toLowerCase(),
           password: hashPassword(data.adminPassword),
           role: 'ADMIN',

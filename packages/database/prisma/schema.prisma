@@ -39,7 +39,8 @@ model Tenant {
 model User {
   id        String   @id @default(uuid())
   name      String
-  email     String   @unique
+  username  String   @unique
+  email     String?  @unique
   password  String
   role      Role     @default(CASHIER)
   tenantId  String?
@@ -47,6 +48,8 @@ model User {
   createdAt DateTime @default(now())
 
   cashSessions CashSession[]
+
+  @@unique([tenantId, username])
 }
 
 enum Role {
@@ -83,6 +86,8 @@ model Product {
   price         Float // Final (tax-inclusive) selling price = basePrice * (1 + taxPercentage/100)
   cost          Float
   stock         Int         @default(0)
+  quantityMin   Float       @default(0)
+  quantityMax   Float?      @default(0)
   imageUrl      String?
   categoryId    String?
   category      Category?   @relation(fields: [categoryId], references: [id])
@@ -122,6 +127,8 @@ model Sale {
   subtotal      Float         @default(0)
   cashReceived  Float?
   changeDue     Float?
+  totalReceived Float         @default(0)
+  totalChange   Float         @default(0)
   ncf           String?
   ncfType       NcfType       @default(VENTA_RAPIDA)
   clientRnc     String?

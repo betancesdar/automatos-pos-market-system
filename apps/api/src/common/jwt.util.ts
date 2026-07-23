@@ -5,7 +5,8 @@ export const LICENSE_BLOCKED_MESSAGE =
 
 export interface TokenPayload extends JwtPayload {
   sub: string;
-  email: string;
+  email?: string | null;
+  username: string;
   role: string;
   tenantId?: string | null;
 }

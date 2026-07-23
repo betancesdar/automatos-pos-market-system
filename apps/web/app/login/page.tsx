@@ -10,7 +10,7 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const redirect = searchParams.get('redirect') || '/admin';
 
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -29,7 +29,7 @@ function LoginForm() {
     setError('');
     setSubmitting(true);
     try {
-      const session = await login(email, password);
+      const session = await login(identifier, password);
       const dest =
         session.role === 'SUPER_ADMIN' ? '/superadmin' :
         session.role === 'CASHIER' ? '/pos' : redirect;
@@ -56,10 +56,10 @@ function LoginForm() {
             <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
           )}
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Correo</label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+            <label className="mb-1 block text-sm font-medium text-slate-700">Usuario o correo</label>
+            <input type="text" value={identifier} onChange={(e) => setIdentifier(e.target.value)}
               className="w-full rounded-lg border border-slate-300 px-4 py-2.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
-              placeholder="Entra tu correo o nombre de usuario" required />
+              placeholder="Ingresa tu usuario o correo" required />
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">Contraseña</label>

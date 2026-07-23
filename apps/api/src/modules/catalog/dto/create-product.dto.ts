@@ -22,6 +22,8 @@ export class CreateProductDto {
 
   cost?: number;
   stock?: number;
+  quantityMin?: number;
+  quantityMax?: number | null;
   categoryId?: string;
   imageUrl?: string;
 }

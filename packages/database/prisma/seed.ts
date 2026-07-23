@@ -100,6 +100,7 @@ async function main() {
     await prisma.user.create({
       data: {
         name: 'Darío Betances',
+        username: 'dario',
         email: superEmail,
         password: hashPassword('superadmin2026'),
         role: Role.SUPER_ADMIN,
@@ -108,12 +109,24 @@ async function main() {
     })
     console.log('✅  SUPER_ADMIN: dario@minimarket-os.com / superadmin2026')
   } else {
+    await prisma.user.update({
+      where: { id: existingSuper.id },
+      data: { username: 'dario' },
+    })
     console.log('⚠️   SUPER_ADMIN already exists')
   }
 
   const existing = await prisma.tenant.findFirst({ where: { rnc: '123456789' } })
   if (existing) {
     console.log(`⚠️   Tenant already exists (id: ${existing.id}). Ensuring categories & product links…`)
+    await prisma.user.updateMany({
+      where: { tenantId: existing.id, email: 'admin@elprimo.com' },
+      data: { username: 'admin' },
+    })
+    await prisma.user.updateMany({
+      where: { tenantId: existing.id, email: 'cajero@elprimo.com' },
+      data: { username: 'cajero' },
+    })
     await ensureDemoTenantData(existing.id)
     console.log('\n🎉  Seed complete!')
     return
@@ -137,6 +150,7 @@ async function main() {
     data: [
       {
         name: 'Admin Principal',
+        username: 'admin',
         email: 'admin@elprimo.com',
         password: hashPassword('admin123'),
         role: Role.ADMIN,
@@ -144,6 +158,7 @@ async function main() {
       },
       {
         name: 'Cajero Demo',
+        username: 'cajero',
         email: 'cajero@elprimo.com',
         password: hashPassword('cajero123'),
         role: Role.CASHIER,
@@ -151,7 +166,7 @@ async function main() {
       },
     ],
   })
-  console.log('✅  Users: admin@elprimo.com / admin123, cajero@elprimo.com / cajero123')
+  console.log('✅  Users: admin / admin123, cajero / cajero123 (email login also supported)')
 
   await prisma.nCFSequence.createMany({
     data: [

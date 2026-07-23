@@ -134,6 +134,7 @@ export class CatalogService {
 
   async addProduct(tenantId: string, data: CreateProductDto) {
     if (!data.name?.trim()) throw new BadRequestException('Product name is required');
+    this.validateInventoryBounds(data.quantityMin ?? 0, data.quantityMax ?? 0);
 
     const { basePrice, taxPercentage, price } = this.resolvePricing(data);
     if (price < 0) throw new BadRequestException('Valid price is required');
@@ -162,6 +163,8 @@ export class CatalogService {
         price,
         cost: data.cost ?? 0,
         stock: data.stock ?? 0,
+        quantityMin: data.quantityMin ?? 0,
+        quantityMax: data.quantityMax ?? 0,
         categoryId: data.categoryId || null,
         imageUrl: data.imageUrl?.trim() || null,
         tenantId,
@@ -201,6 +204,12 @@ export class CatalogService {
   async updateProduct(tenantId: string, productId: string, data: UpdateProductDto) {
     const product = await this.prisma.product.findFirst({ where: { id: productId, tenantId } });
     if (!product) throw new NotFoundException('Product not found');
+    if (data.quantityMin !== undefined || data.quantityMax !== undefined) {
+      this.validateInventoryBounds(
+        data.quantityMin ?? product.quantityMin,
+        data.quantityMax ?? product.quantityMax,
+      );
+    }
 
     // Recompute pricing whenever any pricing input changes.
     const pricingTouched =
@@ -235,6 +244,8 @@ export class CatalogService {
         ...(pricing && { basePrice: pricing.basePrice, taxPercentage: pricing.taxPercentage, price: pricing.price }),
         ...(data.cost !== undefined && { cost: data.cost }),
         ...(data.stock !== undefined && { stock: data.stock }),
+        ...(data.quantityMin !== undefined && { quantityMin: data.quantityMin }),
+        ...(data.quantityMax !== undefined && { quantityMax: data.quantityMax }),
         ...(data.categoryId !== undefined && { categoryId: data.categoryId || null }),
         ...(data.imageUrl !== undefined && { imageUrl: data.imageUrl?.trim() || null }),
       },
@@ -245,6 +256,15 @@ export class CatalogService {
       await this.cacheManager.set(`product:${tenantId}:${updated.barcode}`, updated, 300000);
     }
     return updated;
+  }
+
+  private validateInventoryBounds(quantityMin: number, quantityMax: number | null) {
+    if (quantityMin < 0 || (quantityMax != null && quantityMax < 0)) {
+      throw new BadRequestException('Los límites de inventario no pueden ser negativos');
+    }
+    if (quantityMax != null && quantityMax > 0 && quantityMin > quantityMax) {
+      throw new BadRequestException('La cantidad mínima no puede superar la cantidad máxima');
+    }
   }
 
   async deleteProduct(tenantId: string, productId: string) {

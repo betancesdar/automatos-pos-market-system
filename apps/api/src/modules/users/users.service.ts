@@ -7,7 +7,8 @@ import { signToken } from '../../common/jwt.util';
 export interface AuthUserDto {
   id: string;
   name: string;
-  email: string;
+  username: string;
+  email: string | null;
   role: Role;
   tenantId: string | null;
 }
@@ -16,15 +17,24 @@ export interface AuthUserDto {
 export class AuthService {
   constructor(private prisma: PrismaService) {}
 
-  async login(email: string, password: string): Promise<{ user: AuthUserDto; token: string }> {
-    const user = await this.prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
+  async login(identifier: string, password: string): Promise<{ user: AuthUserDto; token: string }> {
+    const normalizedIdentifier = identifier.trim();
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { username: { equals: normalizedIdentifier, mode: 'insensitive' } },
+          { email: { equals: normalizedIdentifier.toLowerCase(), mode: 'insensitive' } },
+        ],
+      },
+    });
     if (!user || !verifyPassword(password, user.password)) {
-      throw new UnauthorizedException('Invalid email or password');
+      throw new UnauthorizedException('Invalid username/email or password');
     }
 
     const userDto: AuthUserDto = {
       id: user.id,
       name: user.name,
+      username: user.username,
       email: user.email,
       role: user.role,
       tenantId: user.tenantId,
@@ -33,6 +43,7 @@ export class AuthService {
     const token = signToken({
       sub: user.id,
       email: user.email,
+      username: user.username,
       role: user.role,
       tenantId: user.tenantId,
     });
@@ -46,6 +57,7 @@ export class AuthService {
     return {
       id: user.id,
       name: user.name,
+      username: user.username,
       email: user.email,
       role: user.role,
       tenantId: user.tenantId,
@@ -60,17 +72,17 @@ export class UsersService {
   async listUsers(tenantId: string) {
     return this.prisma.user.findMany({
       where: { tenantId },
-      select: { id: true, name: true, email: true, role: true, createdAt: true },
+      select: { id: true, name: true, username: true, email: true, role: true, createdAt: true },
       orderBy: { name: 'asc' },
     });
   }
 
   async createUser(
     tenantId: string,
-    data: { name: string; email: string; password: string; role: Role },
+    data: { name: string; username: string; email?: string; password: string; role: Role },
   ) {
     if (!data.name?.trim()) throw new BadRequestException('Name is required');
-    if (!data.email?.trim()) throw new BadRequestException('Email is required');
+    if (!data.username?.trim()) throw new BadRequestException('Username is required');
     if (!data.password || data.password.length < 4) {
       throw new BadRequestException('Password must be at least 4 characters');
     }
@@ -78,32 +90,46 @@ export class UsersService {
       throw new BadRequestException('Role must be ADMIN or CASHIER');
     }
 
-    const existing = await this.prisma.user.findUnique({ where: { email: data.email } });
-    if (existing) throw new ConflictException('Email already in use');
+    const normalizedUsername = data.username.trim().toLowerCase();
+    const existingUsername = await this.prisma.user.findUnique({ where: { username: normalizedUsername } });
+    if (existingUsername) throw new ConflictException('Username already in use');
+    if (data.email?.trim()) {
+      const existingEmail = await this.prisma.user.findUnique({
+        where: { email: data.email.trim().toLowerCase() },
+      });
+      if (existingEmail) throw new ConflictException('Email already in use');
+    }
 
     return this.prisma.user.create({
       data: {
         tenantId,
         name: data.name.trim(),
-        email: data.email.trim().toLowerCase(),
+        username: normalizedUsername,
+        email: data.email?.trim().toLowerCase() || null,
         password: hashPassword(data.password),
         role: data.role,
       },
-      select: { id: true, name: true, email: true, role: true, createdAt: true },
+      select: { id: true, name: true, username: true, email: true, role: true, createdAt: true },
     });
   }
 
   async updateUser(
     tenantId: string,
     userId: string,
-    data: { name?: string; email?: string; password?: string; role?: Role },
+    data: { name?: string; username?: string; email?: string | null; password?: string; role?: Role },
   ) {
     const user = await this.prisma.user.findFirst({ where: { id: userId, tenantId } });
     if (!user) throw new NotFoundException('User not found');
 
     if (data.email && data.email !== user.email) {
-      const existing = await this.prisma.user.findUnique({ where: { email: data.email } });
+      const existing = await this.prisma.user.findUnique({ where: { email: data.email.trim().toLowerCase() } });
       if (existing) throw new ConflictException('Email already in use');
+    }
+    if (data.username?.trim() && data.username.trim().toLowerCase() !== user.username) {
+      const existing = await this.prisma.user.findUnique({
+        where: { username: data.username.trim().toLowerCase() },
+      });
+      if (existing) throw new ConflictException('Username already in use');
     }
 
     if (data.role && data.role !== Role.ADMIN && data.role !== Role.CASHIER) {
@@ -114,11 +140,12 @@ export class UsersService {
       where: { id: userId },
       data: {
         name: data.name?.trim(),
-        email: data.email?.trim().toLowerCase(),
+        username: data.username?.trim().toLowerCase(),
+        ...(data.email !== undefined && { email: data.email?.trim().toLowerCase() || null }),
         role: data.role,
         ...(data.password ? { password: hashPassword(data.password) } : {}),
       },
-      select: { id: true, name: true, email: true, role: true, createdAt: true },
+      select: { id: true, name: true, username: true, email: true, role: true, createdAt: true },
     });
   }
 

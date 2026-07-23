@@ -8,7 +8,8 @@ export const LICENSE_BLOCKED_CODE = 'LICENSE_BLOCKED';
 export interface AuthUser {
   id: string;
   name: string;
-  email: string;
+  username: string;
+  email: string | null;
   role: 'SUPER_ADMIN' | 'ADMIN' | 'CASHIER';
   tenantId: string | null;
 }
@@ -71,12 +72,12 @@ export async function superadminFetch<T>(path: string, options?: RequestInit): P
   return handleResponse<T>(res);
 }
 
-export async function authLogin(email: string, password: string): Promise<AuthUser> {
+export async function authLogin(identifier: string, password: string): Promise<AuthUser> {
   const res = await fetch('/api/auth/login', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ identifier, password }),
   });
   const data = await handleResponse<{ user: AuthUser }>(res);
   return data.user;

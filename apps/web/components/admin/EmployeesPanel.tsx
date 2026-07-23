@@ -6,13 +6,14 @@ import { apiFetch } from '../../lib/api';
 interface Employee {
   id: string;
   name: string;
-  email: string;
+  username: string;
+  email: string | null;
   role: 'ADMIN' | 'CASHIER';
   createdAt: string;
 }
 
-const emptyForm: { name: string; email: string; password: string; role: 'ADMIN' | 'CASHIER' } = {
-  name: '', email: '', password: '', role: 'CASHIER',
+const emptyForm: { name: string; username: string; email: string; password: string; role: 'ADMIN' | 'CASHIER' } = {
+  name: '', username: '', email: '', password: '', role: 'CASHIER',
 };
 
 export function EmployeesPanel({ tenantId }: { tenantId: string }) {
@@ -47,7 +48,7 @@ export function EmployeesPanel({ tenantId }: { tenantId: string }) {
 
   const openEdit = (emp: Employee) => {
     setEditingId(emp.id);
-    setForm({ name: emp.name, email: emp.email, password: '', role: emp.role });
+    setForm({ name: emp.name, username: emp.username, email: emp.email ?? '', password: '', role: emp.role });
     setShowForm(true);
     setError('');
   };
@@ -58,7 +59,12 @@ export function EmployeesPanel({ tenantId }: { tenantId: string }) {
     setError('');
     try {
       if (editingId) {
-        const body: Record<string, string> = { name: form.name, email: form.email, role: form.role };
+        const body: Record<string, string | null> = {
+          name: form.name,
+          username: form.username,
+          email: form.email || null,
+          role: form.role,
+        };
         if (form.password) body.password = form.password;
         await apiFetch(`/users/${editingId}`, tenantId, { method: 'PUT', body: JSON.stringify(body) });
       } else {
@@ -122,12 +128,21 @@ export function EmployeesPanel({ tenantId }: { tenantId: string }) {
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Correo</label>
+              <label className="mb-1 block text-sm font-medium text-slate-700">Usuario</label>
+              <input
+                value={form.username}
+                onChange={(e) => setForm({ ...form, username: e.target.value })}
+                required
+                autoComplete="username"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">Correo <span className="text-slate-400">(opcional)</span></label>
               <input
                 type="email"
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
-                required
                 className="w-full rounded-lg border border-slate-300 px-3 py-2"
               />
             </div>
@@ -179,6 +194,7 @@ export function EmployeesPanel({ tenantId }: { tenantId: string }) {
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50 text-slate-500">
               <th className="px-6 py-3 text-left font-semibold">Nombre</th>
+              <th className="px-4 py-3 text-left font-semibold">Usuario</th>
               <th className="px-4 py-3 text-left font-semibold">Correo</th>
               <th className="px-4 py-3 text-left font-semibold">Rol</th>
               <th className="px-6 py-3 text-right font-semibold">Acciones</th>
@@ -186,11 +202,12 @@ export function EmployeesPanel({ tenantId }: { tenantId: string }) {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={4} className="px-6 py-8 text-center text-slate-400">Cargando…</td></tr>
+              <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-400">Cargando…</td></tr>
             ) : employees.map((emp) => (
               <tr key={emp.id} className="border-b border-slate-100 hover:bg-slate-50">
                 <td className="px-6 py-3 font-medium text-slate-900">{emp.name}</td>
-                <td className="px-4 py-3 text-slate-600">{emp.email}</td>
+                <td className="px-4 py-3 font-mono text-xs text-slate-600">{emp.username}</td>
+                <td className="px-4 py-3 text-slate-600">{emp.email ?? '—'}</td>
                 <td className="px-4 py-3">
                   <span className={`rounded px-2 py-0.5 text-xs font-semibold ${
                     emp.role === 'ADMIN' ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-600'
