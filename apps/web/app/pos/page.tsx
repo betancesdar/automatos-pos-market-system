@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { BarcodeScanner } from '../../components/BarcodeScanner';
 import { ReceiptPrinter } from '../../components/ReceiptPrinter';
+import type { ThermalReceiptData } from '../../lib/thermal-receipt';
 import { QuickAddProductModal } from '../../components/QuickAddProductModal';
 import { OpenCashSessionModal } from '../../components/pos/OpenCashSessionModal';
 import { CloseCashSessionModal } from '../../components/pos/CloseCashSessionModal';
@@ -224,7 +225,21 @@ export default function POSPage() {
     try {
       const data = await apiFetch<{
         receiptRaw?: string;
-        sale: { ncf?: string | null; total: number; totalReceived: number; totalChange: number };
+        sale: {
+          ncf?: string | null;
+          ncfType?: string | null;
+          invoiceNumber?: string | null;
+          total: number;
+          subtotal: number;
+          itbis: number;
+          applyItbis: boolean;
+          totalReceived: number;
+          totalChange: number;
+          paymentMethod: string;
+          createdAt: string;
+          items: { quantity: number; price: number; product: { name: string } }[];
+          tenant: { name: string; commercialName?: string | null; rnc?: string | null; address?: string | null; phone?: string | null; receiptFooter?: string | null };
+        };
       }>(
         '/sales/checkout', tenantId,
         {
@@ -246,8 +261,35 @@ export default function POSPage() {
         },
       );
 
-      if (data.receiptRaw && typeof window !== 'undefined' && (window as any).printReceipt) {
-        await (window as any).printReceipt(data.receiptRaw);
+      if (typeof window !== 'undefined' && (window as any).printReceipt) {
+        const thermalData: ThermalReceiptData = {
+          business: {
+            name: data.sale.tenant.commercialName || data.sale.tenant.name,
+            rnc: data.sale.tenant.rnc,
+            address: data.sale.tenant.address,
+            phone: data.sale.tenant.phone,
+          },
+          invoiceNumber: data.sale.invoiceNumber,
+          ncf: data.sale.ncf,
+          ncfType: data.sale.ncfType,
+          date: new Date(data.sale.createdAt),
+          cashierName: user?.name,
+          items: data.sale.items.map((item) => ({
+            quantity: item.quantity,
+            name: item.product.name,
+            unitPrice: item.price,
+            total: parseFloat((item.price * item.quantity).toFixed(2)),
+          })),
+          subtotal: data.sale.subtotal,
+          itbis: data.sale.itbis,
+          applyItbis: data.sale.applyItbis,
+          total: data.sale.total,
+          paymentMethod: data.sale.paymentMethod,
+          totalReceived: data.sale.totalReceived,
+          totalChange: data.sale.totalChange,
+          footerMessage: data.sale.tenant.receiptFooter,
+        };
+        await (window as any).printReceipt(data.receiptRaw ?? '', thermalData);
       }
 
       setLastSale({
