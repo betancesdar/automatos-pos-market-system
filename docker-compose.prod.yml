@@ -38,6 +38,9 @@ services:
       PORT: 4000
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@minimarket_postgres_prod:5432/${POSTGRES_DB}
       REDIS_URL: redis://:${REDIS_PASSWORD}@minimarket_redis_prod:6379
+      REDIS_HOST: minimarket_redis_prod
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       COOKIE_SECRET: ${COOKIE_SECRET}
       CORS_ORIGINS: ${CORS_ORIGINS}
@@ -69,6 +72,28 @@ services:
     networks:
       - minimarket_public
 
+  # Reverse proxy: terminates HTTPS for app.<domain> and api.<domain>
+  # and forwards traffic internally to the web/api containers.
+  # Works behind Cloudflare (recommended: DNS "Full (strict)" mode with
+  # Cloudflare Origin CA certs, or "DNS only" grey-cloud mode so Caddy can
+  # issue its own Let's Encrypt certs via HTTP-01).
+  minimarket_caddy_prod:
+    image: caddy:2-alpine
+    container_name: minimarket_caddy_prod
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - minimarket_api_prod
+      - minimarket_web_prod
+    networks:
+      - minimarket_public
+
 networks:
   minimarket_internal:
     driver: bridge
@@ -79,3 +104,5 @@ networks:
 volumes:
   postgres_prod_data:
   redis_prod_data:
+  caddy_data:
+  caddy_config:

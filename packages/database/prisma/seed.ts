@@ -94,7 +94,7 @@ async function main() {
   console.log('🌱  Seeding database...')
 
   // Super Admin — Darío Betances
-  const superEmail = 'dario@minimarket-os.com'
+  const superEmail = 'dario@automatostech.com'
   const existingSuper = await prisma.user.findUnique({ where: { email: superEmail } })
   if (!existingSuper) {
     await prisma.user.create({
@@ -107,7 +107,7 @@ async function main() {
         tenantId: null,
       },
     })
-    console.log('✅  SUPER_ADMIN: dario@minimarket-os.com / superadmin2026')
+    console.log(`✅  SUPER_ADMIN: ${superEmail} / superadmin2026`)
   } else {
     await prisma.user.update({
       where: { id: existingSuper.id },

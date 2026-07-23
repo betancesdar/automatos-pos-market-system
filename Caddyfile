@@ -1,0 +1,9 @@
+api.automatostech.com {
+	reverse_proxy minimarket_api_prod:4000
+	encode gzip
+}
+
+app.automatostech.com {
+	reverse_proxy minimarket_web_prod:3000
+	encode gzip
+}

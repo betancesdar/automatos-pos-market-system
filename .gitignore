@@ -1,4 +1,3 @@
-cat << 'EOF' > .gitignore
 # Dependencies
 node_modules/
 .pnpm-store/
@@ -13,7 +12,9 @@ build/
 .env
 .env.local
 
+# Local Postgres data (dev docker volume) — never commit DB binary files
+postgres/
+
 # OS files
 .DS_Store
 Thumbs.db
-EOF
