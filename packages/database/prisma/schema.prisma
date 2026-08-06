@@ -123,6 +123,10 @@ model NCFSequence {
 model Sale {
   id            String        @id @default(uuid())
   invoiceNumber String?
+  // Client-generated UUID for sales made while offline. Used by /sales/sync
+  // to guarantee idempotency (never double-charge/double-deduct stock) when
+  // the POS re-submits its pending offline queue.
+  offlineId     String?       @unique
   total         Float
   subtotal      Float         @default(0)
   cashReceived  Float?

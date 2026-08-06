@@ -85,14 +85,19 @@ export function ReceiptPrinter() {
    * @param thermalData     Structured receipt data — used for the HTML fallback.
    */
   const printReceipt = async (base64RawString: string, thermalData?: ThermalReceiptData) => {
+    // Offline sales have no server-generated ESC/POS payload yet (it's built
+    // when the sale finally syncs) — go straight to the HTML fallback so we
+    // never send an empty/garbage buffer to a connected USB/Serial printer.
+    const hasRawPayload = !!base64RawString;
+
     try {
-      if (usbDevice && usbEndpoint !== null) {
+      if (hasRawPayload && usbDevice && usbEndpoint !== null) {
         const data = base64ToUint8Array(base64RawString);
         await sendRawToWebUsbPrinter(usbDevice, usbEndpoint, data);
         return;
       }
 
-      if (serialPort) {
+      if (hasRawPayload && serialPort) {
         const writer = serialPort.writable?.getWriter();
         if (!writer) throw new Error('Cannot get writable stream');
         const data = base64ToUint8Array(base64RawString);

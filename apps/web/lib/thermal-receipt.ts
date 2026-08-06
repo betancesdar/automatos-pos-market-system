@@ -33,6 +33,8 @@ export interface ThermalReceiptData {
   totalChange: number;
   footerMessage?: string | null;
   qrCodeUrl?: string | null;
+  /** Shown as a highlighted banner when the sale was captured offline and is pending sync. */
+  offlineNotice?: string | null;
 }
 
 const PAYMENT_LABELS: Record<string, string> = {
@@ -79,6 +81,15 @@ const THERMAL_80MM_STYLES = `
   .footer .qr { margin-top: 8px; }
   .footer .qr img { width: 28mm; height: 28mm; }
   .footer .legal { margin-top: 6px; font-size: 9px; color: #333; }
+  .offline-banner {
+    margin: 6px 0;
+    padding: 4px 6px;
+    border: 1px dashed #000;
+    text-align: center;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
 `;
 
 function money(n: number): string {
@@ -117,6 +128,8 @@ export function buildThermalReceiptHtml(data: ThermalReceiptData): string {
   </div>
 
   <div class="divider"></div>
+
+  ${data.offlineNotice ? `<div class="offline-banner">${escapeHtml(data.offlineNotice)}</div>` : ''}
 
   ${data.invoiceNumber ? `<div>Factura: <span class="bold">${escapeHtml(data.invoiceNumber)}</span></div>` : ''}
   ${data.ncf ? `<div>NCF: <span class="bold">${escapeHtml(data.ncf)}</span></div>` : ''}

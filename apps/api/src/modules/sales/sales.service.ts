@@ -30,6 +30,21 @@ interface CheckoutData {
   discountAmount?: number;
 }
 
+export interface OfflineSalePayload extends CheckoutData {
+  /** Client-generated UUID — must be stable across sync retries for idempotency. */
+  offlineId: string;
+  /** ISO timestamp captured on-device at the moment the offline sale happened. */
+  offlineCreatedAt?: string;
+}
+
+export interface SyncSaleResult {
+  offlineId: string;
+  status: 'synced' | 'duplicate' | 'error';
+  saleId?: string;
+  invoiceNumber?: string | null;
+  error?: string;
+}
+
 interface ListSalesFilters {
   search?: string;
   from?: string;
@@ -54,8 +69,81 @@ export class SalesService {
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      let subtotal = 0;
+    return this.prisma.$transaction((tx) =>
+      this.processSale(tx, tenantId, data, { cashSessionId: openSession.id }),
+    );
+  }
+
+  /**
+   * Processes offline-queued sales submitted by the POS once connectivity is
+   * restored. Each sale is keyed by a client-generated `offlineId`: if that
+   * ID already exists in the DB the sale is skipped (idempotent — never
+   * double-charges or double-deducts stock), otherwise it is processed with
+   * the exact same logic/validation as a live `checkout()`.
+   */
+  async syncOfflineSales(tenantId: string, sales: OfflineSalePayload[], userId: string): Promise<SyncSaleResult[]> {
+    const results: SyncSaleResult[] = [];
+
+    // Best-effort cash session link: offline sales may be synced after the
+    // shift that produced them was already closed, so we don't block sync on
+    // an OPEN session — we just attach the user's most recent session if any.
+    const lastSession = await this.prisma.cashSession.findFirst({
+      where: { tenantId, userId },
+      orderBy: { openedAt: 'desc' },
+    });
+
+    for (const saleData of sales) {
+      if (!saleData.offlineId) {
+        results.push({ offlineId: '', status: 'error', error: 'Missing offlineId' });
+        continue;
+      }
+
+      try {
+        const existing = await this.prisma.sale.findUnique({ where: { offlineId: saleData.offlineId } });
+        if (existing) {
+          results.push({
+            offlineId: saleData.offlineId,
+            status: 'duplicate',
+            saleId: existing.id,
+            invoiceNumber: existing.invoiceNumber,
+          });
+          continue;
+        }
+
+        const { sale } = await this.prisma.$transaction((tx) =>
+          this.processSale(tx, tenantId, saleData, {
+            cashSessionId: lastSession?.id ?? null,
+            offlineId: saleData.offlineId,
+            createdAtOverride: saleData.offlineCreatedAt ? new Date(saleData.offlineCreatedAt) : undefined,
+          }),
+        );
+
+        results.push({ offlineId: saleData.offlineId, status: 'synced', saleId: sale.id, invoiceNumber: sale.invoiceNumber });
+      } catch (err) {
+        results.push({
+          offlineId: saleData.offlineId,
+          status: 'error',
+          error: err instanceof Error ? err.message : 'Unknown error',
+        });
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Core sale-processing logic shared by live checkout and offline sync.
+   * Must run inside a `$transaction` — validates stock, computes totals,
+   * generates invoice/NCF numbers, deducts stock, and builds the ESC/POS
+   * receipt.
+   */
+  private async processSale(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    data: CheckoutData,
+    opts: { cashSessionId: string | null; offlineId?: string; createdAtOverride?: Date },
+  ) {
+    let subtotal = 0;
       const saleItemsData: {
         productId: string;
         quantity: number;
@@ -148,6 +236,7 @@ export class SalesService {
         data: {
           tenantId,
           invoiceNumber,
+          offlineId: opts.offlineId,
           subtotal,
           total,
           cashReceived,
@@ -162,15 +251,15 @@ export class SalesService {
           applyItbis: shouldApplyItbis,
           paymentMethod,
           status: 'COMPLETED',
-          cashSessionId: openSession.id,
+          cashSessionId: opts.cashSessionId,
+          ...(opts.createdAtOverride ? { createdAt: opts.createdAtOverride } : {}),
           items: { create: saleItemsData },
         },
         include: { items: { include: { product: true } }, tenant: true },
       });
 
-      const receiptRaw = buildSaleReceipt(sale);
-      return { sale, receiptRaw };
-    });
+    const receiptRaw = buildSaleReceipt(sale);
+    return { sale, receiptRaw };
   }
 
   /** Lists invoices/sales for the admin dashboard, with search + date range filters. */

@@ -25,6 +25,15 @@ export class VoidSaleDto {
   voidReason: string;
 }
 
+export class OfflineSaleDto extends CheckoutDto {
+  offlineId: string;
+  offlineCreatedAt?: string;
+}
+
+export class SyncSalesDto {
+  sales: OfflineSaleDto[];
+}
+
 @Controller('sales')
 export class SalesController {
   constructor(private readonly salesService: SalesService) {}
@@ -37,6 +46,21 @@ export class SalesController {
     @Req() req: Request & { user: TokenPayload },
   ) {
     return this.salesService.checkout(tenantId, data, req.user.sub);
+  }
+
+  /**
+   * Idempotent bulk-sync endpoint for sales made while the POS was offline.
+   * Safe to retry: sales already present (matched by `offlineId`) are
+   * reported as "duplicate" and never reprocessed/double-deducted.
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('sync')
+  sync(
+    @Query('tenantId') tenantId: string,
+    @Body() body: SyncSalesDto,
+    @Req() req: Request & { user: TokenPayload },
+  ) {
+    return this.salesService.syncOfflineSales(tenantId, body.sales ?? [], req.user.sub);
   }
 
   @Get()

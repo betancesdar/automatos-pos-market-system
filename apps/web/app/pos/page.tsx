@@ -4,12 +4,20 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { BarcodeScanner } from '../../components/BarcodeScanner';
 import { ReceiptPrinter } from '../../components/ReceiptPrinter';
-import type { ThermalReceiptData } from '../../lib/thermal-receipt';
+import { printThermalReceiptHtml, type ThermalReceiptData } from '../../lib/thermal-receipt';
 import { QuickAddProductModal } from '../../components/QuickAddProductModal';
 import { OpenCashSessionModal } from '../../components/pos/OpenCashSessionModal';
 import { CloseCashSessionModal } from '../../components/pos/CloseCashSessionModal';
 import { useAuth } from '../../lib/auth-context';
 import { apiFetch, LicenseBlockedError } from '../../lib/api';
+import { useOfflineSync } from '../../lib/useOfflineSync';
+import {
+  cacheCategories,
+  cacheProducts,
+  getCachedCategories,
+  getCachedProducts,
+  queuePendingSale,
+} from '../../lib/offline-db';
 import {
   RECEIPT_TYPES,
   type CartLine,
@@ -22,6 +30,39 @@ import {
 } from '../../lib/pos-types';
 
 type PaymentMethod = 'CASH' | 'CARD' | 'TRANSFER';
+
+interface TenantProfile {
+  name: string;
+  commercialName?: string | null;
+  rnc?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  receiptFooter?: string | null;
+}
+
+function tenantProfileKey(tenantId: string) {
+  return `mm_tenant_profile_${tenantId}`;
+}
+
+/** Persists the last known tenant/business info locally so offline receipts still show a proper header. */
+function saveTenantProfile(tenantId: string, profile: TenantProfile) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(tenantProfileKey(tenantId), JSON.stringify(profile));
+  } catch {
+    // localStorage may be unavailable (private mode / quota) — non-critical.
+  }
+}
+
+function loadTenantProfile(tenantId: string): TenantProfile | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(tenantProfileKey(tenantId));
+    return raw ? (JSON.parse(raw) as TenantProfile) : null;
+  } catch {
+    return null;
+  }
+}
 
 function newCartId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -91,6 +132,10 @@ export default function POSPage() {
   const [cashSession, setCashSession] = useState<CashSession | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
   const [showCloseSession, setShowCloseSession] = useState(false);
+  const [offlineNoticeMessage, setOfflineNoticeMessage] = useState('');
+  const [usingCachedCatalog, setUsingCachedCatalog] = useState(false);
+
+  const { isOnline, pendingCount, syncing, syncNow } = useOfflineSync(tenantId);
 
   const receiptConfig = RECEIPT_TYPES.find((r) => r.value === receiptType)!;
   const subtotal = cart.reduce((s, i) => s + lineTotal(i), 0);
@@ -99,6 +144,29 @@ export default function POSPage() {
   const grandTotal = netSubtotal;
   const previewReceived = paymentMethod === 'CASH' ? parseFloat(cashReceived) || 0 : grandTotal;
   const previewChange = Math.max(0, previewReceived - grandTotal);
+
+  /** Filters the locally cached product snapshot the same way the API's category/search query params would. */
+  const filterCachedProducts = useCallback(
+    async (): Promise<PosProduct[]> => {
+      const cached = await getCachedProducts();
+      const term = search.trim().toLowerCase();
+      return cached
+        .filter((p) => activeCategory === 'TODOS' || p.categoryId === activeCategory)
+        .filter((p) => !term || p.name.toLowerCase().includes(term) || (p.barcode ?? '').includes(term))
+        .map((p) => ({
+          id: p.id,
+          name: p.name,
+          price: p.price,
+          stock: p.stock,
+          barcode: p.barcode,
+          imageUrl: p.imageUrl,
+          category: p.categoryId
+            ? { id: p.categoryId, name: p.categoryName ?? '', slug: p.categorySlug ?? '' }
+            : null,
+        }));
+    },
+    [activeCategory, search],
+  );
 
   const loadProducts = useCallback(async () => {
     if (!tenantId) return;
@@ -113,12 +181,40 @@ export default function POSPage() {
         tenantId,
       );
       setProducts(data);
+      setUsingCachedCatalog(false);
+      // Background-refresh the offline cache whenever we're online — cache
+      // the FULL catalog (unfiltered) so offline search/category browsing
+      // still works regardless of what the cashier last searched for.
+      apiFetch<PosProduct[]>('/catalog/products', tenantId)
+        .then((all) =>
+          cacheProducts(
+            all.map((p) => ({
+              id: p.id,
+              name: p.name,
+              price: p.price,
+              stock: p.stock,
+              barcode: p.barcode,
+              imageUrl: p.imageUrl,
+              categoryId: p.category?.id ?? null,
+              categoryName: p.category?.name ?? null,
+              categorySlug: p.category?.slug ?? null,
+            })),
+          ),
+        )
+        .catch(() => {});
     } catch (err) {
-      if (err instanceof LicenseBlockedError) setLicenseBlocked(err.message);
+      if (err instanceof LicenseBlockedError) {
+        setLicenseBlocked(err.message);
+      } else {
+        // Network/API unreachable — fall back to the offline product cache.
+        const cachedResults = await filterCachedProducts();
+        setProducts(cachedResults);
+        setUsingCachedCatalog(true);
+      }
     } finally {
       setLoadingProducts(false);
     }
-  }, [tenantId, activeCategory, search, setLicenseBlocked]);
+  }, [tenantId, activeCategory, search, setLicenseBlocked, filterCachedProducts]);
 
   useEffect(() => { loadProducts(); }, [loadProducts]);
 
@@ -127,8 +223,14 @@ export default function POSPage() {
     try {
       const data = await apiFetch<Category[]>('/categories', tenantId);
       setCategories(data);
+      cacheCategories(data.map((c) => ({ id: c.id, name: c.name, slug: c.slug }))).catch(() => {});
     } catch (err) {
-      if (err instanceof LicenseBlockedError) setLicenseBlocked(err.message);
+      if (err instanceof LicenseBlockedError) {
+        setLicenseBlocked(err.message);
+      } else {
+        const cached = await getCachedCategories();
+        setCategories(cached.map((c) => ({ id: c.id, name: c.name, slug: c.slug })));
+      }
     }
   }, [tenantId, setLicenseBlocked]);
 
@@ -204,8 +306,86 @@ export default function POSPage() {
     }));
   };
 
+  /** Builds the /sales/checkout-compatible payload from the current cart/form state. */
+  const buildCheckoutBody = (received: number) => ({
+    items: cart.map((i) => ({
+      productId: i.productId,
+      quantity: i.quantity,
+      unitPrice: i.unitPrice,
+      isLoose: i.isLoose,
+    })),
+    cashReceived: received,
+    ncfType: receiptType,
+    applyItbis,
+    clientRnc: receiptConfig.needsRnc ? clientRnc : undefined,
+    paymentMethod,
+    discountAmount: discountAmount > 0 ? discountAmount : undefined,
+  });
+
+  const resetCheckoutForm = () => {
+    setCart([]);
+    setDiscountAmount(0);
+    setShowCheckout(false);
+    setCashReceived('');
+    setClientRnc('');
+  };
+
+  /**
+   * Offline checkout path: queues the sale in IndexedDB (`pending_sales`),
+   * instantly prints an 80mm HTML receipt (no server-generated ESC/POS is
+   * available yet — that's built once the sale syncs), and surfaces a clear
+   * "pending sync" status to the cashier.
+   */
+  const finalizeSaleOffline = async (received: number) => {
+    const body = buildCheckoutBody(received);
+    const tenantProfile = loadTenantProfile(tenantId) ?? { name: 'MiniMarket' };
+
+    await queuePendingSale(tenantId, body, {
+      total: grandTotal,
+      totalReceived: received,
+      totalChange: Math.max(0, received - grandTotal),
+      itemCount: cart.length,
+    });
+
+    const thermalData: ThermalReceiptData = {
+      business: {
+        name: tenantProfile.commercialName || tenantProfile.name,
+        rnc: tenantProfile.rnc,
+        address: tenantProfile.address,
+        phone: tenantProfile.phone,
+      },
+      invoiceNumber: null,
+      ncf: null,
+      ncfType: null,
+      date: new Date(),
+      cashierName: user?.name,
+      items: cart.map((i) => ({
+        quantity: i.quantity,
+        name: i.name,
+        unitPrice: i.unitPrice,
+        total: lineTotal(i),
+      })),
+      subtotal: netSubtotal,
+      itbis: itbisAmount,
+      applyItbis,
+      total: grandTotal,
+      paymentMethod,
+      totalReceived: received,
+      totalChange: Math.max(0, received - grandTotal),
+      footerMessage: tenantProfile.receiptFooter,
+      offlineNotice: 'VENTA OFFLINE · PENDIENTE DE SINCRONIZAR',
+    };
+
+    printThermalReceiptHtml(thermalData);
+
+    setLastSale({ ncf: null, total: grandTotal, totalReceived: received, totalChange: Math.max(0, received - grandTotal) });
+    setOfflineNoticeMessage('Venta guardada en modo Offline (Pendiente de sincronizar)');
+    resetCheckoutForm();
+  };
+
   const finalizeSale = async () => {
     setCheckoutError('');
+    setOfflineNoticeMessage('');
     if (cart.length === 0) return;
 
     const received = paymentMethod === 'CASH'
@@ -219,6 +399,12 @@ export default function POSPage() {
 
     if (receiptConfig.needsRnc && !clientRnc.trim()) {
       setCheckoutError('RNC del cliente es obligatorio para Crédito Fiscal');
+      return;
+    }
+
+    // No internet at all — skip the network round-trip entirely.
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      await finalizeSaleOffline(received);
       return;
     }
 
@@ -244,22 +430,18 @@ export default function POSPage() {
         '/sales/checkout', tenantId,
         {
           method: 'POST',
-          body: JSON.stringify({
-            items: cart.map((i) => ({
-              productId: i.productId,
-              quantity: i.quantity,
-              unitPrice: i.unitPrice,
-              isLoose: i.isLoose,
-            })),
-            cashReceived: received,
-            ncfType: receiptType,
-            applyItbis,
-            clientRnc: receiptConfig.needsRnc ? clientRnc : undefined,
-            paymentMethod,
-            discountAmount: discountAmount > 0 ? discountAmount : undefined,
-          }),
+          body: JSON.stringify(buildCheckoutBody(received)),
         },
       );
+
+      saveTenantProfile(tenantId, {
+        name: data.sale.tenant.name,
+        commercialName: data.sale.tenant.commercialName,
+        rnc: data.sale.tenant.rnc,
+        address: data.sale.tenant.address,
+        phone: data.sale.tenant.phone,
+        receiptFooter: data.sale.tenant.receiptFooter,
+      });
 
       if (typeof window !== 'undefined' && (window as any).printReceipt) {
         const thermalData: ThermalReceiptData = {
@@ -298,19 +480,26 @@ export default function POSPage() {
         totalReceived: data.sale.totalReceived,
         totalChange: data.sale.totalChange,
       });
-      setCart([]);
-      setDiscountAmount(0);
-      setShowCheckout(false);
-      setCashReceived('');
-      setClientRnc('');
+      resetCheckoutForm();
       loadProducts();
     } catch (err) {
-      if (err instanceof LicenseBlockedError) setLicenseBlocked(err.message);
-      else {
-        const msg = err instanceof Error ? err.message : 'Error en facturación';
-        setCheckoutError(msg);
-        if (msg.toLowerCase().includes('caja')) loadCashSession();
+      if (err instanceof LicenseBlockedError) {
+        setLicenseBlocked(err.message);
+        return;
       }
+
+      // A genuine connectivity failure (fetch couldn't even reach our own
+      // Next.js server / the API) — not a business validation error from
+      // the backend. Queue the sale offline instead of blocking the cashier.
+      const isNetworkFailure = err instanceof TypeError || (typeof navigator !== 'undefined' && !navigator.onLine);
+      if (isNetworkFailure) {
+        await finalizeSaleOffline(received);
+        return;
+      }
+
+      const msg = err instanceof Error ? err.message : 'Error en facturación';
+      setCheckoutError(msg);
+      if (msg.toLowerCase().includes('caja')) loadCashSession();
     }
   };
 
@@ -408,8 +597,36 @@ export default function POSPage() {
           </h1>
           <p className="text-xs text-slate-500">{user?.name} · Terminal de ventas</p>
         </div>
+
+        {/* Online/Offline connectivity badge + manual sync */}
+        <div className="flex items-center gap-2">
+          <div
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold ${
+              isOnline ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
+            }`}
+          >
+            <span>{isOnline ? '🟢' : '🔴'}</span>
+            <span>
+              {isOnline
+                ? 'En línea'
+                : `Modo Offline${pendingCount > 0 ? ` (${pendingCount} venta${pendingCount === 1 ? '' : 's'} pendiente${pendingCount === 1 ? '' : 's'} de subir)` : ''}`}
+            </span>
+          </div>
+          {pendingCount > 0 && (
+            <button
+              onClick={syncNow}
+              disabled={syncing || !isOnline}
+              className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+              title={!isOnline ? 'Necesitas conexión a internet para sincronizar' : undefined}
+            >
+              {syncing ? 'Sincronizando…' : `🔄 Sincronizar ahora (${pendingCount})`}
+            </button>
+          )}
+        </div>
+
         {lastSale && (
-          <div className="rounded-lg bg-emerald-50 px-3 py-1.5 text-xs text-emerald-700">
+          <div className={`rounded-lg px-3 py-1.5 text-xs ${offlineNoticeMessage ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-700'}`}>
+            {offlineNoticeMessage && <p className="font-bold">⚠️ {offlineNoticeMessage}</p>}
             <p>Última venta RD$ {lastSale.total.toFixed(2)}</p>
             <p className="mt-0.5 text-[11px]">
               Recibido: RD$ {lastSale.totalReceived.toFixed(2)} · Cambio: RD$ {lastSale.totalChange.toFixed(2)}
@@ -431,6 +648,12 @@ export default function POSPage() {
       <div className="flex min-h-0 flex-1">
         {/* LEFT — Product workspace */}
         <div className="flex min-w-0 flex-1 flex-col border-r border-slate-200 bg-slate-50">
+          {usingCachedCatalog && (
+            <div className="border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-center text-xs font-semibold text-amber-800">
+              📦 Mostrando catálogo guardado localmente (sin conexión) — los precios/stock pueden no estar actualizados
+            </div>
+          )}
+
           {/* Search */}
           <div className="border-b border-slate-200 bg-white p-4">
             <input
