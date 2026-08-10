@@ -8,6 +8,9 @@ import { printThermalReceiptHtml, type ThermalReceiptData } from '../../lib/ther
 import { QuickAddProductModal } from '../../components/QuickAddProductModal';
 import { OpenCashSessionModal } from '../../components/pos/OpenCashSessionModal';
 import { CloseCashSessionModal } from '../../components/pos/CloseCashSessionModal';
+import { SalesHistoryModal } from '../../components/pos/SalesHistoryModal';
+import { ShiftDetailsModal } from '../../components/pos/ShiftDetailsModal';
+import { CashMovementModal } from '../../components/pos/CashMovementModal';
 import { useAuth } from '../../lib/auth-context';
 import { apiFetch, LicenseBlockedError } from '../../lib/api';
 import { useOfflineSync } from '../../lib/useOfflineSync';
@@ -134,6 +137,10 @@ export default function POSPage() {
   const [showCloseSession, setShowCloseSession] = useState(false);
   const [offlineNoticeMessage, setOfflineNoticeMessage] = useState('');
   const [usingCachedCatalog, setUsingCachedCatalog] = useState(false);
+  const [showSalesHistory, setShowSalesHistory] = useState(false);
+  const [showShiftDetails, setShowShiftDetails] = useState(false);
+  const [showCashMovement, setShowCashMovement] = useState(false);
+  const [shiftRefreshKey, setShiftRefreshKey] = useState(0);
 
   const { isOnline, pendingCount, syncing, syncNow } = useOfflineSync(tenantId);
 
@@ -575,7 +582,6 @@ export default function POSPage() {
   return (
     <div className="flex h-screen flex-col bg-slate-100 font-sans text-slate-900">
       <BarcodeScanner onScan={handleScan} />
-      <ReceiptPrinter />
       <QuickAddProductModal isOpen={modalOpen} barcode={scannedBarcode} suggestedName={suggestedName}
         onClose={() => setModalOpen(false)} onSave={async (d) => {
           const p = await apiFetch<PosProduct>('/catalog/product', tenantId, { method: 'POST', body: JSON.stringify(d) });
@@ -586,7 +592,27 @@ export default function POSPage() {
         tenantId={tenantId}
         session={cashSession}
         onClose={() => setShowCloseSession(false)}
-        onClosed={() => { setShowCloseSession(false); setCashSession(null); }}
+        onClosed={() => { setShowCloseSession(false); setCashSession(null); setShowShiftDetails(false); }}
+      />
+      <SalesHistoryModal
+        isOpen={showSalesHistory}
+        tenantId={tenantId}
+        cashierName={user?.name}
+        onClose={() => setShowSalesHistory(false)}
+      />
+      <ShiftDetailsModal
+        isOpen={showShiftDetails}
+        tenantId={tenantId}
+        refreshKey={shiftRefreshKey}
+        onClose={() => setShowShiftDetails(false)}
+        onCloseShiftRequested={() => { setShowShiftDetails(false); setShowCloseSession(true); }}
+      />
+      <CashMovementModal
+        isOpen={showCashMovement}
+        tenantId={tenantId}
+        sessionId={cashSession?.id}
+        onClose={() => setShowCashMovement(false)}
+        onSaved={() => setShiftRefreshKey((k) => k + 1)}
       />
 
       {/* Top bar */}
@@ -634,7 +660,33 @@ export default function POSPage() {
             {lastSale.ncf && <p className="mt-0.5 font-mono text-[11px]">NCF: {lastSale.ncf}</p>}
           </div>
         )}
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {/* Compact printer connection dropdown — relocated here so it no
+              longer floats over the cart/checkout totals. */}
+          <ReceiptPrinter variant="compact" />
+
+          <button
+            onClick={() => setShowSalesHistory(true)}
+            title="Historial de Ventas — contingencia si se acaba el papel"
+            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
+          >
+            🧾 Historial
+          </button>
+
+          <button
+            onClick={() => setShowShiftDetails(true)}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
+          >
+            📊 Turno
+          </button>
+
+          <button
+            onClick={() => setShowCashMovement(true)}
+            className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-100"
+          >
+            💵 Movimiento
+          </button>
+
           <button onClick={() => setShowCloseSession(true)} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-800 hover:bg-amber-100">
             🔒 Cerrar Caja
           </button>

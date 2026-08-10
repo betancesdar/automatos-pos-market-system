@@ -11,6 +11,16 @@ import {
 } from '../lib/webusb-printer';
 import { printThermalReceiptHtml, type ThermalReceiptData } from '../lib/thermal-receipt';
 
+interface ReceiptPrinterProps {
+  /**
+   * "floating" (default): the original always-visible bottom-right button
+   * stack — used on pages without a dedicated header slot (e.g. /admin).
+   * "compact": a small dropdown icon meant to be dropped into a header/top
+   * nav bar (e.g. the POS), so it doesn't obstruct the checkout area.
+   */
+  variant?: 'floating' | 'compact';
+}
+
 /**
  * Handles connection + printing for 80mm USB thermal receipt printers.
  *
@@ -22,7 +32,8 @@ import { printThermalReceiptHtml, type ThermalReceiptData } from '../lib/thermal
  *      no printer is connected/paired or the browser lacks WebUSB/Serial
  *      support (e.g. Safari/Firefox).
  */
-export function ReceiptPrinter() {
+export function ReceiptPrinter({ variant = 'floating' }: ReceiptPrinterProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const [serialPort, setSerialPort] = useState<SerialPort | null>(null);
   const [usbDevice, setUsbDevice] = useState<USBDevice | null>(null);
   const [usbEndpoint, setUsbEndpoint] = useState<number | null>(null);
@@ -125,6 +136,65 @@ export function ReceiptPrinter() {
 
   const connected = !!usbDevice || !!serialPort;
 
+  // ── "compact" variant: small dropdown icon for a header/top-nav bar ──
+  if (variant === 'compact') {
+    return (
+      <div className="relative">
+        <button
+          onClick={() => setMenuOpen((v) => !v)}
+          className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
+            connected
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+              : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+          }`}
+          title="Conexión de impresora térmica"
+        >
+          <span>🖨️</span>
+          <span className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+        </button>
+
+        {menuOpen && (
+          <>
+            {/* Click-outside overlay */}
+            <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+            <div className="absolute right-0 z-50 mt-2 w-72 space-y-2 rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
+              <p className="px-1 text-xs font-bold uppercase tracking-wide text-slate-400">Impresora Térmica 80mm</p>
+              <button
+                onClick={connectUsbPrinter}
+                disabled={usbConnecting}
+                className={`w-full rounded-lg px-4 py-2 text-left text-sm font-bold text-white shadow ${
+                  usbDevice ? 'bg-green-600' : 'bg-slate-700 hover:bg-slate-600'
+                }`}
+              >
+                {usbDevice
+                  ? '🖨️ Impresora USB Conectada'
+                  : usbConnecting
+                    ? 'Conectando…'
+                    : '🔌 Conectar Impresora USB (WebUSB)'}
+              </button>
+              {!usbDevice && (
+                <button
+                  onClick={connectSerialPrinter}
+                  className={`w-full rounded-lg px-3 py-1.5 text-left text-xs font-semibold text-white shadow ${
+                    serialPort ? 'bg-green-600' : 'bg-slate-500 hover:bg-slate-400'
+                  }`}
+                >
+                  {serialPort ? '✅ Serial Conectada' : 'Conectar por Web Serial'}
+                </button>
+              )}
+              {!connected && (
+                <span className="block rounded bg-amber-100 px-2 py-1 text-[10px] font-medium text-amber-800">
+                  Sin impresora conectada · se usará impresión por ventana (80mm)
+                </span>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // ── "floating" variant (default, unchanged): original always-visible stack ──
   return (
     <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2">
       <button
