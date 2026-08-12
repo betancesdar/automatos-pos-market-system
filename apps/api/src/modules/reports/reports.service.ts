@@ -50,6 +50,12 @@ export class ReportsService {
     const netSales = sales.reduce((s, sale) => s + sale.total, 0);
     grossSales = parseFloat(grossSales.toFixed(2));
 
+    // Net profit = net sales (post-discount, tax-exclusive line totals) minus
+    // the cost of goods sold. Margin is expressed as a % of net sales, with
+    // a safe fallback when there are no sales in the selected period.
+    const grossProfit = parseFloat((netSales - totalCost).toFixed(2));
+    const profitMargin = netSales > 0 ? parseFloat(((grossProfit / netSales) * 100).toFixed(2)) : 0;
+
     return {
       period: { from: from || 'all-time', to: to || 'now' },
       totalSales: sales.length,
@@ -58,7 +64,11 @@ export class ReportsService {
       itbisCollected: parseFloat(itbisCollected.toFixed(2)),
       totalDiscount: parseFloat(totalDiscount.toFixed(2)),
       totalCost: parseFloat(totalCost.toFixed(2)),
-      netProfit: parseFloat((netSales - totalCost).toFixed(2)),
+      // `grossProfit` is the canonical field going forward; `netProfit` is
+      // kept as an alias so any existing consumers of this endpoint keep working.
+      grossProfit,
+      netProfit: grossProfit,
+      profitMargin,
       byPaymentMethod: Object.values(byPaymentMethod).map((p) => ({
         ...p,
         total: parseFloat(p.total.toFixed(2)),
@@ -77,7 +87,10 @@ export class ReportsService {
       include: { product: { select: { id: true, name: true, imageUrl: true } } },
     });
 
-    const map = new Map<string, { productId: string; name: string; imageUrl: string | null; qty: number; revenue: number }>();
+    const map = new Map<
+      string,
+      { productId: string; name: string; imageUrl: string | null; qty: number; revenue: number; cost: number }
+    >();
     for (const item of saleItems) {
       const existing = map.get(item.productId) ?? {
         productId: item.productId,
@@ -85,14 +98,24 @@ export class ReportsService {
         imageUrl: item.product.imageUrl,
         qty: 0,
         revenue: 0,
+        cost: 0,
       };
       existing.qty += item.quantity;
       existing.revenue += item.price * item.quantity;
+      // `SaleItem.cost` is the unit cost snapshotted at sale time — fall back
+      // to the current product cost if a legacy row ever has it unset (0/null).
+      existing.cost += (item.cost || 0) * item.quantity;
       map.set(item.productId, existing);
     }
 
     return Array.from(map.values())
-      .map((p) => ({ ...p, revenue: parseFloat(p.revenue.toFixed(2)), qty: parseFloat(p.qty.toFixed(2)) }))
+      .map((p) => {
+        const revenue = parseFloat(p.revenue.toFixed(2));
+        const cost = parseFloat(p.cost.toFixed(2));
+        const profit = parseFloat((revenue - cost).toFixed(2));
+        const marginPct = revenue > 0 ? parseFloat(((profit / revenue) * 100).toFixed(2)) : 0;
+        return { ...p, revenue, cost, profit, marginPct, qty: parseFloat(p.qty.toFixed(2)) };
+      })
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, limit);
   }

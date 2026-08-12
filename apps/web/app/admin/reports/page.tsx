@@ -22,6 +22,9 @@ interface SalesReport {
   netSales: number;
   itbisCollected: number;
   totalDiscount: number;
+  totalCost: number;
+  grossProfit: number;
+  profitMargin: number;
   byPaymentMethod: PaymentBreakdown[];
 }
 
@@ -31,6 +34,9 @@ interface TopProduct {
   imageUrl: string | null;
   qty: number;
   revenue: number;
+  cost: number;
+  profit: number;
+  marginPct: number;
 }
 
 const PAYMENT_LABELS: Record<string, { label: string; icon: string; color: string }> = {
@@ -117,7 +123,7 @@ export default function ReportsPage() {
     const paymentRows = (report?.byPaymentMethod ?? []).map((p) => `
       <tr><td>${PAYMENT_LABELS[p.method]?.label ?? p.method}</td><td class="num">${p.count}</td><td class="num">${formatCurrency(p.total)}</td></tr>`).join('');
     const productRows = topProducts.map((p, i) => `
-      <tr><td>${i + 1}</td><td>${escapeHtml(p.name)}</td><td class="num">${p.qty % 1 === 0 ? p.qty : p.qty.toFixed(2)}</td><td class="num">${formatCurrency(p.revenue)}</td></tr>`).join('');
+      <tr><td>${i + 1}</td><td>${escapeHtml(p.name)}</td><td class="num">${p.qty % 1 === 0 ? p.qty : p.qty.toFixed(2)}</td><td class="num">${formatCurrency(p.revenue)}</td><td class="num">${formatCurrency(p.profit)}</td><td class="num">${p.marginPct.toFixed(1)}%</td></tr>`).join('');
 
     printDocument('Reporte de Ventas', `
       <div class="header"><div><h1>Reporte de Ventas</h1><p class="muted">${report?.period.from?.slice(0, 10) ?? ''} → ${report?.period.to?.slice(0, 10) ?? ''}</p></div></div>
@@ -126,11 +132,13 @@ export default function ReportsPage() {
         <div class="kpi"><div class="label">Ventas Netas</div><div class="value">${formatCurrency(report?.netSales)}</div></div>
         <div class="kpi"><div class="label">ITBIS</div><div class="value">${formatCurrency(report?.itbisCollected)}</div></div>
         <div class="kpi"><div class="label">Descuentos</div><div class="value">${formatCurrency(report?.totalDiscount)}</div></div>
+        <div class="kpi"><div class="label">Costo de Productos</div><div class="value">${formatCurrency(report?.totalCost)}</div></div>
+        <div class="kpi"><div class="label">Ganancia Estimada (Margen ${(report?.profitMargin ?? 0).toFixed(1)}%)</div><div class="value">${formatCurrency(report?.grossProfit)}</div></div>
       </div>
       <h2>Desglose por Método de Pago</h2>
       <table><thead><tr><th>Método</th><th class="num">Ventas</th><th class="num">Total</th></tr></thead><tbody>${paymentRows || '<tr><td colspan="3" class="muted">Sin datos.</td></tr>'}</tbody></table>
       <h2>Productos Más Vendidos</h2>
-      <table><thead><tr><th>#</th><th>Producto</th><th class="num">Unidades</th><th class="num">Ingresos</th></tr></thead><tbody>${productRows || '<tr><td colspan="4" class="muted">Sin datos.</td></tr>'}</tbody></table>
+      <table><thead><tr><th>#</th><th>Producto</th><th class="num">Unidades</th><th class="num">Ingresos</th><th class="num">Ganancia</th><th class="num">Margen</th></tr></thead><tbody>${productRows || '<tr><td colspan="6" class="muted">Sin datos.</td></tr>'}</tbody></table>
     `);
   };
 
@@ -172,11 +180,24 @@ export default function ReportsPage() {
       {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
       {/* KPI cards */}
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-4">
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-3 lg:grid-cols-6">
         <MetricCard label="Ventas Brutas" value={formatCurrency(report?.grossSales)} sub="Antes de descuentos" />
         <MetricCard label="Ventas Netas" value={formatCurrency(report?.netSales)} accent="text-emerald-600" sub={`${report?.totalSales ?? 0} transacciones`} />
         <MetricCard label="ITBIS Recaudado" value={formatCurrency(report?.itbisCollected)} accent="text-amber-600" sub="18% DGII" />
         <MetricCard label="Descuentos Aplicados" value={formatCurrency(report?.totalDiscount)} accent="text-indigo-600" />
+        <MetricCard label="Costo de Productos" value={formatCurrency(report?.totalCost)} accent="text-red-600" sub="Costo de mercancía vendida" />
+
+        {/* High-visibility profit card with a prominent margin badge */}
+        <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50 p-5 shadow-sm">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Ganancia Estimada</p>
+            <span className="rounded-full bg-emerald-600 px-2.5 py-0.5 text-xs font-bold text-white">
+              Margen: {(report?.profitMargin ?? 0).toFixed(1)}%
+            </span>
+          </div>
+          <p className="mt-2 text-2xl font-bold tabular-nums text-emerald-700">{formatCurrency(report?.grossProfit)}</p>
+          <p className="mt-1 text-sm text-emerald-600">Ventas netas − costo de productos</p>
+        </div>
       </section>
 
       {/* Payment method breakdown */}
@@ -218,6 +239,8 @@ export default function ReportsPage() {
                   <th className="px-4 py-3 text-left font-semibold">Producto</th>
                   <th className="px-4 py-3 text-right font-semibold">Unidades</th>
                   <th className="px-4 py-3 text-right font-semibold">Ingresos</th>
+                  <th className="px-4 py-3 text-right font-semibold">Ganancia</th>
+                  <th className="px-4 py-3 text-right font-semibold">Margen</th>
                   <th className="px-6 py-3 text-left font-semibold">Participación</th>
                 </tr>
               </thead>
@@ -228,6 +251,14 @@ export default function ReportsPage() {
                     <td className="px-4 py-3 font-medium text-slate-800">{p.name}</td>
                     <td className="px-4 py-3 text-right tabular-nums">{p.qty % 1 === 0 ? p.qty : p.qty.toFixed(2)}</td>
                     <td className="px-4 py-3 text-right font-semibold tabular-nums text-emerald-600">{formatCurrency(p.revenue)}</td>
+                    <td className="px-4 py-3 text-right font-semibold tabular-nums text-slate-700">{formatCurrency(p.profit)}</td>
+                    <td className="px-4 py-3 text-right">
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-bold tabular-nums ${
+                        p.marginPct >= 30 ? 'bg-emerald-100 text-emerald-700' : p.marginPct >= 15 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
+                      }`}>
+                        {p.marginPct.toFixed(1)}%
+                      </span>
+                    </td>
                     <td className="px-6 py-3">
                       <div className="h-1.5 w-32 rounded-full bg-slate-100">
                         <div className="h-1.5 rounded-full bg-indigo-500" style={{ width: `${(p.revenue / maxProductRevenue) * 100}%` }} />
@@ -236,7 +267,7 @@ export default function ReportsPage() {
                   </tr>
                 ))}
                 {topProducts.length === 0 && (
-                  <tr><td colSpan={5} className="px-6 py-16 text-center text-slate-400">No hay ventas registradas en este período.</td></tr>
+                  <tr><td colSpan={7} className="px-6 py-16 text-center text-slate-400">No hay ventas registradas en este período.</td></tr>
                 )}
               </tbody>
             </table>
