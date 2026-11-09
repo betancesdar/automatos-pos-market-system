@@ -44,7 +44,7 @@ model User {
   password  String
   role      Role     @default(CASHIER)
   tenantId  String?
-  tenant    Tenant?  @relation(fields: [tenantId], references: [id])
+  tenant    Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
 
   cashSessions CashSession[]
@@ -64,7 +64,7 @@ model Category {
   slug        String
   description String?
   tenantId    String
-  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   products    Product[]
   createdAt   DateTime  @default(now())
 
@@ -92,7 +92,7 @@ model Product {
   categoryId    String?
   category      Category?   @relation(fields: [categoryId], references: [id])
   tenantId      String
-  tenant        Tenant      @relation(fields: [tenantId], references: [id])
+  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
   saleItems     SaleItem[]
@@ -110,7 +110,7 @@ enum ProductType {
 model NCFSequence {
   id        String   @id @default(uuid())
   tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   type      NcfType
   prefix    String
   nextValue Int      @default(1)
@@ -144,7 +144,7 @@ model Sale {
   voidedAt      DateTime?
   voidReason    String?
   tenantId      String
-  tenant        Tenant        @relation(fields: [tenantId], references: [id])
+  tenant        Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   cashSessionId String?
   cashSession   CashSession?  @relation(fields: [cashSessionId], references: [id])
   createdAt     DateTime      @default(now())
@@ -157,7 +157,7 @@ model Sale {
 model CashSession {
   id                     String         @id @default(uuid())
   tenantId               String
-  tenant                 Tenant         @relation(fields: [tenantId], references: [id])
+  tenant                 Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   userId                 String
   user                   User           @relation(fields: [userId], references: [id])
   openedAt               DateTime       @default(now())
@@ -178,7 +178,7 @@ model CashMovement {
   cashSessionId String
   cashSession   CashSession @relation(fields: [cashSessionId], references: [id])
   tenantId      String
-  tenant        Tenant      @relation(fields: [tenantId], references: [id])
+  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   type          String // "INFLOW" | "OUTFLOW"
   amount        Float
   reason        String
@@ -203,7 +203,7 @@ model SaleItem {
 model CashDrawerLog {
   id           String   @id @default(uuid())
   tenantId     String
-  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   shiftDate    DateTime @default(now())
   expectedCash Float
   countedCash  Float

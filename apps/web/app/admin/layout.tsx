@@ -3,6 +3,16 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../lib/auth-context';
+import dynamic from 'next/dynamic';
+
+// Import ImpersonationBanner with SSR disabled to prevent hydration issues
+const ImpersonationBanner = dynamic(
+  () => import('../../components/ImpersonationBanner'),
+  { 
+    ssr: false,
+    loading: () => null
+  }
+);
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -35,5 +45,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     );
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      <ImpersonationBanner />
+      {children}
+    </>
+  );
 }

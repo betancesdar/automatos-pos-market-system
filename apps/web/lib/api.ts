@@ -49,13 +49,26 @@ export async function apiFetch<T>(
   options?: RequestInit,
 ): Promise<T> {
   const separator = path.includes('?') ? '&' : '?';
+  
+  // Check for impersonation token
+  const impersonationToken = typeof window !== 'undefined' 
+    ? localStorage.getItem('impersonation_token') 
+    : null;
+  
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...options?.headers as Record<string, string>,
+  };
+  
+  // Add Bearer token if impersonating
+  if (impersonationToken) {
+    headers['Authorization'] = `Bearer ${impersonationToken}`;
+  }
+  
   const res = await fetch(`/api/proxy${path}${separator}tenantId=${encodeURIComponent(tenantId)}`, {
     ...options,
     credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
+    headers,
   });
   return handleResponse<T>(res);
 }
@@ -84,7 +97,20 @@ export async function authLogin(identifier: string, password: string): Promise<A
 }
 
 export async function authMe(): Promise<AuthUser | null> {
-  const res = await fetch('/api/auth/me', { credentials: 'include' });
+  // Check for impersonation token
+  const impersonationToken = typeof window !== 'undefined' 
+    ? localStorage.getItem('impersonation_token') 
+    : null;
+  
+  const headers: Record<string, string> = {};
+  if (impersonationToken) {
+    headers['Authorization'] = `Bearer ${impersonationToken}`;
+  }
+  
+  const res = await fetch('/api/auth/me', { 
+    credentials: 'include',
+    headers: Object.keys(headers).length > 0 ? headers : undefined,
+  });
   if (res.status === 401) return null;
   return handleResponse<AuthUser>(res);
 }

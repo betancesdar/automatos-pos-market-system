@@ -2,11 +2,21 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { BarcodeScanner } from '../../components/BarcodeScanner';
 import { ReceiptPrinter } from '../../components/ReceiptPrinter';
 import { printThermalReceiptHtml, type ThermalReceiptData } from '../../lib/thermal-receipt';
 import { QuickAddProductModal } from '../../components/QuickAddProductModal';
 import { OpenCashSessionModal } from '../../components/pos/OpenCashSessionModal';
+
+// Import ImpersonationBanner with SSR disabled
+const ImpersonationBanner = dynamic(
+  () => import('../../components/ImpersonationBanner'),
+  { 
+    ssr: false,
+    loading: () => null
+  }
+);
 import { CloseCashSessionModal } from '../../components/pos/CloseCashSessionModal';
 import { SalesHistoryModal } from '../../components/pos/SalesHistoryModal';
 import { ShiftDetailsModal } from '../../components/pos/ShiftDetailsModal';
@@ -581,6 +591,7 @@ export default function POSPage() {
 
   return (
     <div className="flex h-screen flex-col bg-slate-100 font-sans text-slate-900">
+      <ImpersonationBanner />
       <BarcodeScanner onScan={handleScan} />
       <QuickAddProductModal isOpen={modalOpen} barcode={scannedBarcode} suggestedName={suggestedName}
         onClose={() => setModalOpen(false)} onSave={async (d) => {

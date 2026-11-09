@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '../../lib/auth-context';
 import { superadminFetch } from '../../lib/api';
 
@@ -18,9 +19,13 @@ interface TenantRow {
   isActive: boolean;
   expiresAt: string;
   phone: string | null;
+  address: string | null;
   users: { name: string; email: string }[];
   _count: { users: number; products: number };
 }
+
+type ModalType = 'create' | 'edit' | 'renew' | 'delete' | null;
+type RenewOption = 'MONTH_1' | 'MONTH_6' | 'YEAR_1' | 'INDEFINITE';
 
 const emptyForm = {
   name: '',
@@ -34,15 +39,20 @@ const emptyForm = {
 };
 
 export default function SuperadminPage() {
+  const router = useRouter();
   const { user, logout } = useAuth();
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [tenants, setTenants] = useState<TenantRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
+  const [modalType, setModalType] = useState<ModalType>(null);
+  const [selectedTenant, setSelectedTenant] = useState<TenantRow | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [actionId, setActionId] = useState<string | null>(null);
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const [renewOption, setRenewOption] = useState<RenewOption>('MONTH_1');
+  const [customExpiryDate, setCustomExpiryDate] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -62,6 +72,124 @@ export default function SuperadminPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClick = () => setOpenDropdown(null);
+    if (openDropdown) {
+      document.addEventListener('click', handleClick);
+      return () => document.removeEventListener('click', handleClick);
+    }
+  }, [openDropdown]);
+
+  const openModal = (type: ModalType, tenant?: TenantRow) => {
+    setModalType(type);
+    setSelectedTenant(tenant || null);
+    setError('');
+    if (type === 'edit' && tenant) {
+      setForm({
+        ...emptyForm,
+        name: tenant.name,
+        rnc: tenant.rnc,
+        phone: tenant.phone || '',
+        address: tenant.address || '',
+        plan: tenant.plan,
+      });
+      setCustomExpiryDate(tenant.expiresAt?.split('T')[0] || '');
+    } else if (type === 'create') {
+      setForm(emptyForm);
+    }
+    setOpenDropdown(null);
+  };
+
+  const closeModal = () => {
+    setModalType(null);
+    setSelectedTenant(null);
+    setError('');
+    setForm(emptyForm);
+    setCustomExpiryDate('');
+    setRenewOption('MONTH_1');
+  };
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError('');
+    try {
+      await superadminFetch('/superadmin/tenants', {
+        method: 'POST',
+        body: JSON.stringify(form),
+      });
+      closeModal();
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error al crear tenant');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedTenant) return;
+    setSubmitting(true);
+    setError('');
+    try {
+      await superadminFetch(`/superadmin/tenants/${selectedTenant.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: form.name,
+          rnc: form.rnc,
+          phone: form.phone || null,
+          address: form.address || null,
+          plan: form.plan,
+          expiresAt: customExpiryDate ? new Date(customExpiryDate).toISOString() : undefined,
+        }),
+      });
+      closeModal();
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error al actualizar tenant');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleRenew = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedTenant) return;
+    setSubmitting(true);
+    setError('');
+    try {
+      await superadminFetch(`/superadmin/tenants/${selectedTenant.id}/renew`, {
+        method: 'POST',
+        body: JSON.stringify({ option: renewOption }),
+      });
+      closeModal();
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error al renovar tenant');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!selectedTenant) return;
+    setSubmitting(true);
+    setError('');
+    try {
+      await superadminFetch(`/superadmin/tenants/${selectedTenant.id}`, {
+        method: 'DELETE',
+      });
+      closeModal();
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error al eliminar tenant');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const toggleActive = async (tenant: TenantRow) => {
     setActionId(tenant.id);
     try {
@@ -77,26 +205,35 @@ export default function SuperadminPage() {
     }
   };
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmitting(true);
-    setError('');
+  const handleImpersonate = async (tenant: TenantRow) => {
+    setActionId(tenant.id);
     try {
-      await superadminFetch('/superadmin/tenants', {
-        method: 'POST',
-        body: JSON.stringify(form),
-      });
-      setShowModal(false);
-      setForm(emptyForm);
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al crear tenant');
+      const response = await superadminFetch<{ token: string; tenant: any; user: any }>(
+        `/superadmin/tenants/${tenant.id}/impersonate`,
+        { method: 'POST' }
+      );
+      
+      // Store impersonation token and context
+      localStorage.setItem('impersonation_token', response.token);
+      localStorage.setItem('impersonation_tenant', JSON.stringify(response.tenant));
+      localStorage.setItem('original_auth', 'true');
+      
+      // Redirect to POS
+      router.push('/pos');
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Error al iniciar impersonación');
     } finally {
-      setSubmitting(false);
+      setActionId(null);
     }
   };
 
   const isExpired = (date: string) => new Date(date) < new Date();
+
+  const getStatus = (tenant: TenantRow) => {
+    if (!tenant.isActive) return { label: 'SUSPENDIDO', color: 'bg-amber-500/20 text-amber-400' };
+    if (isExpired(tenant.expiresAt)) return { label: 'EXPIRADO', color: 'bg-red-500/20 text-red-400' };
+    return { label: 'ACTIVO', color: 'bg-emerald-500/20 text-emerald-400' };
+  };
 
   return (
     <div className="min-h-screen bg-slate-950 font-sans text-slate-100">
@@ -135,14 +272,14 @@ export default function SuperadminPage() {
             <button onClick={load} disabled={loading} className="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800 disabled:opacity-50">
               {loading ? 'Cargando…' : '↻ Actualizar'}
             </button>
-            <button onClick={() => { setShowModal(true); setError(''); }} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold hover:bg-violet-500">
+            <button onClick={() => openModal('create')} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold hover:bg-violet-500">
               + Registrar Minimarket
             </button>
           </div>
         </div>
 
         {/* Tenants table */}
-        <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900">
+        <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-800 text-slate-500">
@@ -151,13 +288,12 @@ export default function SuperadminPage() {
                 <th className="px-4 py-3 text-left font-semibold">Plan</th>
                 <th className="px-4 py-3 text-left font-semibold">Vencimiento</th>
                 <th className="px-4 py-3 text-left font-semibold">Estado</th>
-                <th className="px-6 py-3 text-right font-semibold">Acción</th>
+                <th className="px-6 py-3 text-right font-semibold">Acciones</th>
               </tr>
             </thead>
             <tbody>
               {tenants.map((t) => {
-                const expired = isExpired(t.expiresAt);
-                const status = !t.isActive ? 'SUSPENDIDO' : expired ? 'EXPIRADO' : 'ACTIVO';
+                const status = getStatus(t);
                 return (
                   <tr key={t.id} className="border-b border-slate-800/50 hover:bg-slate-800/30">
                     <td className="px-6 py-4">
@@ -172,26 +308,58 @@ export default function SuperadminPage() {
                       {new Date(t.expiresAt).toLocaleDateString('es-DO')}
                     </td>
                     <td className="px-4 py-4">
-                      <span className={`rounded px-2 py-0.5 text-xs font-bold ${
-                        status === 'ACTIVO' ? 'bg-emerald-500/20 text-emerald-400' :
-                        status === 'EXPIRADO' ? 'bg-amber-500/20 text-amber-400' :
-                        'bg-red-500/20 text-red-400'
-                      }`}>
-                        {status}
+                      <span className={`rounded px-2 py-0.5 text-xs font-bold ${status.color}`}>
+                        {status.label}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-right">
-                      <button
-                        onClick={() => toggleActive(t)}
-                        disabled={actionId === t.id}
-                        className={`rounded-lg px-3 py-1.5 text-xs font-bold disabled:opacity-50 ${
-                          t.isActive
-                            ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-                            : 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
-                        }`}
-                      >
-                        {actionId === t.id ? '…' : t.isActive ? 'SUSPENDER' : 'ACTIVAR'}
-                      </button>
+                    <td className="relative px-6 py-4 text-right">
+                      <div className="relative inline-block">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenDropdown(openDropdown === t.id ? null : t.id);
+                          }}
+                          className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-bold text-slate-300 hover:bg-slate-700"
+                        >
+                          Acciones ▾
+                        </button>
+                        {openDropdown === t.id && (
+                          <div className="absolute right-0 z-[100] mt-1 w-56 rounded-lg border border-slate-700 bg-slate-900 shadow-2xl">
+                            <button
+                              onClick={() => handleImpersonate(t)}
+                              disabled={actionId === t.id}
+                              className="w-full px-4 py-2.5 text-left text-sm font-medium text-violet-400 hover:bg-slate-800 disabled:opacity-50"
+                            >
+                              🔐 Ingresar como Comercio
+                            </button>
+                            <button
+                              onClick={() => openModal('renew', t)}
+                              className="w-full px-4 py-2.5 text-left text-sm font-medium text-emerald-400 hover:bg-slate-800"
+                            >
+                              ✓ Renovar / Activar
+                            </button>
+                            <button
+                              onClick={() => openModal('edit', t)}
+                              className="w-full px-4 py-2.5 text-left text-sm font-medium text-blue-400 hover:bg-slate-800"
+                            >
+                              ✎ Editar Comercio
+                            </button>
+                            <button
+                              onClick={() => toggleActive(t)}
+                              disabled={actionId === t.id}
+                              className="w-full px-4 py-2.5 text-left text-sm font-medium text-amber-400 hover:bg-slate-800 disabled:opacity-50"
+                            >
+                              {t.isActive ? '⏸ Suspender' : '▶ Reactivar'}
+                            </button>
+                            <button
+                              onClick={() => openModal('delete', t)}
+                              className="w-full px-4 py-2.5 text-left text-sm font-medium text-red-400 hover:bg-slate-800"
+                            >
+                              🗑 Eliminar
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -205,12 +373,12 @@ export default function SuperadminPage() {
       </main>
 
       {/* Create Tenant Modal */}
-      {showModal && (
+      {modalType === 'create' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
             <div className="border-b border-slate-800 px-6 py-4">
               <h3 className="text-lg font-bold text-white">Registrar Nuevo Minimarket</h3>
-              <p className="text-sm text-slate-500">Licencia BASIC activa por 30 días automáticamente</p>
+              <p className="text-sm text-slate-500">Licencia activa por 1 año automáticamente</p>
             </div>
             <form onSubmit={handleCreate} className="space-y-4 px-6 py-5">
               {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</div>}
@@ -240,6 +408,7 @@ export default function SuperadminPage() {
                   className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white">
                   <option value="BASIC">BASIC</option>
                   <option value="PREMIUM">PREMIUM</option>
+                  <option value="ENTERPRISE">ENTERPRISE</option>
                 </select>
               </div>
               <hr className="border-slate-800" />
@@ -260,7 +429,7 @@ export default function SuperadminPage() {
                   className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-violet-500" />
               </div>
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setShowModal(false)} className="flex-1 rounded-lg border border-slate-700 py-2.5 font-medium text-slate-400">
+                <button type="button" onClick={closeModal} className="flex-1 rounded-lg border border-slate-700 py-2.5 font-medium text-slate-400">
                   Cancelar
                 </button>
                 <button type="submit" disabled={submitting} className="flex-1 rounded-lg bg-violet-600 py-2.5 font-semibold text-white disabled:opacity-50">
@@ -268,6 +437,150 @@ export default function SuperadminPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Tenant Modal */}
+      {modalType === 'edit' && selectedTenant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
+            <div className="border-b border-slate-800 px-6 py-4">
+              <h3 className="text-lg font-bold text-white">Editar Comercio</h3>
+              <p className="text-sm text-slate-500">{selectedTenant.name}</p>
+            </div>
+            <form onSubmit={handleUpdate} className="space-y-4 px-6 py-5">
+              {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</div>}
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-400">Nombre Comercial</label>
+                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-violet-500" />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-400">RNC</label>
+                <input value={form.rnc} onChange={(e) => setForm({ ...form, rnc: e.target.value })} required
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-violet-500" />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-400">Teléfono</label>
+                <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-violet-500" />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-400">Dirección</label>
+                <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-violet-500" />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-400">Plan</label>
+                <select value={form.plan} onChange={(e) => setForm({ ...form, plan: e.target.value })}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white">
+                  <option value="BASIC">BASIC</option>
+                  <option value="PREMIUM">PREMIUM</option>
+                  <option value="ENTERPRISE">ENTERPRISE</option>
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-400">Fecha de Expiración</label>
+                <input 
+                  type="date" 
+                  value={customExpiryDate} 
+                  onChange={(e) => setCustomExpiryDate(e.target.value)}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-violet-500" 
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={closeModal} className="flex-1 rounded-lg border border-slate-700 py-2.5 font-medium text-slate-400">
+                  Cancelar
+                </button>
+                <button type="submit" disabled={submitting} className="flex-1 rounded-lg bg-blue-600 py-2.5 font-semibold text-white disabled:opacity-50">
+                  {submitting ? 'Guardando…' : 'Guardar Cambios'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Renew Tenant Modal */}
+      {modalType === 'renew' && selectedTenant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
+            <div className="border-b border-slate-800 px-6 py-4">
+              <h3 className="text-lg font-bold text-white">Renovar / Activar</h3>
+              <p className="text-sm text-slate-500">{selectedTenant.name}</p>
+            </div>
+            <form onSubmit={handleRenew} className="space-y-4 px-6 py-5">
+              {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</div>}
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-400">Extender licencia por:</label>
+                <div className="space-y-2">
+                  {[
+                    { value: 'MONTH_1', label: '+1 Mes' },
+                    { value: 'MONTH_6', label: '+6 Meses' },
+                    { value: 'YEAR_1', label: '+1 Año' },
+                    { value: 'INDEFINITE', label: 'Indefinido (2099-12-31)' },
+                  ].map((opt) => (
+                    <label key={opt.value} className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 cursor-pointer hover:bg-slate-750">
+                      <input
+                        type="radio"
+                        name="renewOption"
+                        value={opt.value}
+                        checked={renewOption === opt.value}
+                        onChange={(e) => setRenewOption(e.target.value as RenewOption)}
+                        className="h-4 w-4"
+                      />
+                      <span className="text-white">{opt.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <p className="text-xs text-slate-500">
+                * Esta acción también activará el comercio (isActive = true)
+              </p>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={closeModal} className="flex-1 rounded-lg border border-slate-700 py-2.5 font-medium text-slate-400">
+                  Cancelar
+                </button>
+                <button type="submit" disabled={submitting} className="flex-1 rounded-lg bg-emerald-600 py-2.5 font-semibold text-white disabled:opacity-50">
+                  {submitting ? 'Renovando…' : 'Renovar y Activar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Tenant Modal */}
+      {modalType === 'delete' && selectedTenant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-red-700 bg-slate-900 shadow-2xl">
+            <div className="border-b border-red-800 bg-red-950/50 px-6 py-4">
+              <h3 className="text-lg font-bold text-red-400">⚠️ Confirmar Eliminación</h3>
+            </div>
+            <div className="space-y-4 px-6 py-5">
+              {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</div>}
+              <p className="text-slate-300">
+                ¿Estás seguro de que deseas eliminar el comercio <strong className="text-white">{selectedTenant.name}</strong>?
+              </p>
+              <div className="rounded-lg bg-red-950/30 border border-red-800/50 px-4 py-3">
+                <p className="text-sm font-semibold text-red-400">Esta acción:</p>
+                <ul className="mt-2 space-y-1 text-sm text-slate-400">
+                  <li>• Eliminará todos los usuarios</li>
+                  <li>• Eliminará todos los productos</li>
+                  <li>• Eliminará todas las ventas e historial</li>
+                  <li>• No se puede deshacer</li>
+                </ul>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={closeModal} className="flex-1 rounded-lg border border-slate-700 py-2.5 font-medium text-slate-400">
+                  Cancelar
+                </button>
+                <button onClick={handleDelete} disabled={submitting} className="flex-1 rounded-lg bg-red-600 py-2.5 font-semibold text-white disabled:opacity-50">
+                  {submitting ? 'Eliminando…' : 'Sí, Eliminar'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
