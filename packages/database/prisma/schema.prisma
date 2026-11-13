@@ -24,6 +24,8 @@ model Tenant {
   workflowMode   String   @default("DIRECT")
   // Atomic per-tenant invoice counter (replaces count()+1)
   invoiceCounter Int      @default(0)
+  // Atomic per-tenant quote (cotización) counter
+  quoteCounter   Int      @default(0)
   // Thermal receipt configuration
   receiptLogoUrl String?
   commercialName String?
@@ -48,6 +50,8 @@ model Tenant {
   reconciliations   CashReconciliation[]
   accountingPeriods AccountingPeriod[]
   customRoles       CustomRole[]
+  customers         Customer[]
+  quotes            Quote[]
 }
 
 model User {
@@ -466,4 +470,81 @@ model AccountingPeriod {
   updatedAt    DateTime  @updatedAt
 
   @@unique([tenantId, year, month])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Clientes y Cotizaciones (Fase 3). Dinero nuevo en Decimal (ver prisma/money.md).
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum CustomerDocType {
+  RNC
+  CEDULA
+  NONE
+}
+
+model Customer {
+  id          String          @id @default(uuid())
+  tenantId    String
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  docType     CustomerDocType @default(NONE)
+  docNumber   String?
+  phone       String?
+  email       String?
+  address     String?
+  creditLimit Decimal         @default(0) @db.Decimal(14, 2)
+  balance     Decimal         @default(0) @db.Decimal(14, 2) // saldo por cobrar (Fase 4)
+  isActive    Boolean         @default(true)
+  notes       String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  quotes      Quote[]
+
+  @@index([tenantId, name])
+  @@index([tenantId, docNumber])
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  CONVERTED
+  EXPIRED
+  CANCELLED
+}
+
+model Quote {
+  id                String      @id @default(uuid())
+  tenantId          String
+  tenant            Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  number            Int // secuencia propia por tenant (Tenant.quoteCounter)
+  customerId        String?
+  customer          Customer?   @relation(fields: [customerId], references: [id])
+  clientNameSnapshot String?    // nombre en el momento (si no hay Customer)
+  status            QuoteStatus @default(DRAFT)
+  validUntil        DateTime?
+  subtotal          Decimal     @default(0) @db.Decimal(14, 2)
+  itbis             Decimal     @default(0) @db.Decimal(14, 2)
+  total             Decimal     @default(0) @db.Decimal(14, 2)
+  notes             String?
+  createdById       String
+  convertedSaleId   String?
+  convertedOrderId  String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  items             QuoteItem[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId, status, createdAt])
+}
+
+model QuoteItem {
+  id        String  @id @default(uuid())
+  quoteId   String
+  quote     Quote   @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  productId String
+  productName String // snapshot para que la cotización no cambie si cambia el producto
+  quantity  Float
+  unitPrice Decimal @db.Decimal(14, 2)
+  isLoose   Boolean @default(false)
 }

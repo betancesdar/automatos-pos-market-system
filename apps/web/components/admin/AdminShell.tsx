@@ -14,6 +14,8 @@ const NAV: NavItem[] = [
   { href: '/admin', label: 'Resumen', icon: '📊' },
   { href: '/admin/inventory', label: 'Inventario', icon: '📦' },
   { href: '/admin/sales', label: 'Facturas', icon: '🧾' },
+  { href: '/admin/quotes', label: 'Cotizaciones', icon: '📝' },
+  { href: '/admin/customers', label: 'Clientes', icon: '👤' },
   { href: '/admin/shifts', label: 'Turnos & Caja', icon: '💵' },
   { href: '/admin/reports', label: 'Reportes', icon: '📈' },
   { href: '/admin/accounting', label: 'Contabilidad', icon: '🧮' },

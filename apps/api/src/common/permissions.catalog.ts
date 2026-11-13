@@ -47,6 +47,12 @@ export const PERMISSIONS: PermissionDef[] = [
   // e-CF
   { code: 'ecf.view', label: 'Ver envíos e-CF', group: 'Facturación electrónica' },
   { code: 'ecf.manage', label: 'Configurar e-CF y reintentar', group: 'Facturación electrónica' },
+  // Clientes y cotizaciones
+  { code: 'customers.view', label: 'Ver clientes', group: 'Clientes' },
+  { code: 'customers.manage', label: 'Crear/editar clientes', group: 'Clientes' },
+  { code: 'quotes.view', label: 'Ver cotizaciones', group: 'Clientes' },
+  { code: 'quotes.manage', label: 'Crear/editar cotizaciones', group: 'Clientes' },
+  { code: 'quotes.convert', label: 'Convertir cotización en venta/pedido', group: 'Clientes' },
   // Administración del comercio
   { code: 'tenant.manage', label: 'Editar datos del comercio', group: 'Administración' },
   { code: 'users.manage', label: 'Gestionar empleados', group: 'Administración' },
@@ -75,8 +81,23 @@ export const ROLE_DEFAULTS: Record<string, string[]> = {
     'cash.view',
     'catalog.view',
     'catalog.create',
+    'customers.view',
+    'customers.manage',
+    'quotes.view',
+    'quotes.manage',
+    'quotes.convert',
   ],
-  BILLER: ['orders.create', 'orders.cancel', 'catalog.view', 'catalog.create'],
+  BILLER: [
+    'orders.create',
+    'orders.cancel',
+    'catalog.view',
+    'catalog.create',
+    'customers.view',
+    'customers.manage',
+    'quotes.view',
+    'quotes.manage',
+    'quotes.convert',
+  ],
   ACCOUNTANT: [
     'sales.view',
     'cash.view',
@@ -88,6 +109,8 @@ export const ROLE_DEFAULTS: Record<string, string[]> = {
     'accounting.view',
     'accounting.manage',
     'ecf.view',
+    'customers.view',
+    'quotes.view',
   ],
 };
 
