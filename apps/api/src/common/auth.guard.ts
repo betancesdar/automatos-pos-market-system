@@ -3,6 +3,7 @@ import {
   CanActivate,
   ExecutionContext,
   UnauthorizedException,
+  ForbiddenException,
   SetMetadata,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -63,8 +64,11 @@ export class RolesGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<Request & { user?: TokenPayload }>();
     const user = request.user;
-    if (!user || !requiredRoles.includes(user.role)) {
-      throw new UnauthorizedException('Insufficient permissions');
+    if (!user) {
+      throw new UnauthorizedException('Authentication required');
+    }
+    if (!requiredRoles.includes(user.role)) {
+      throw new ForbiddenException('Insufficient permissions');
     }
     return true;
   }
