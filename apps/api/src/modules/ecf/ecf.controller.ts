@@ -1,26 +1,15 @@
 import { Controller, Get, Post, Put, Body, Param, Query } from '@nestjs/common';
-import { IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsOptional } from 'class-validator';
 import { EcfService } from './ecf.service';
 import { RequirePermissions } from '../../common/auth.guard';
 import { TenantId } from '../../common/tenant.decorator';
 
+// El comercio solo puede habilitar/deshabilitar su e-CF. El vínculo con la empresa
+// asociada en Pronesoft lo configura el SuperAdmin (matriz).
 class UpsertEcfConfigDto {
   @IsOptional()
   @IsBoolean()
   enabled?: boolean;
-
-  @IsOptional()
-  @IsIn(['sandbox', 'prod'])
-  environment?: string;
-
-  @IsOptional()
-  @IsString()
-  clientId?: string;
-
-  /** Write-only: never returned by any endpoint. */
-  @IsOptional()
-  @IsString()
-  clientSecret?: string;
 }
 
 @Controller('ecf')

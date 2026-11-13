@@ -1,7 +1,7 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
-import { PronesoftClient } from './pronesoft.client';
+import { PronesoftClient, PronesoftApiError } from './pronesoft.client';
 import { encryptSecret, decryptSecret } from './ecf-crypto.util';
 import { NcfType, Prisma } from '@prisma/client';
 
@@ -46,69 +46,147 @@ export class EcfService {
     private pronesoft: PronesoftClient,
   ) {}
 
-  // ───────────────────────── config per tenant ─────────────────────────
+  // ─────────────────── config de la MATRIZ (plataforma) ───────────────────
+
+  private readonly PLATFORM_ID = 'default';
+
+  async getPlatformConfig() {
+    const c = await this.prisma.platformEcfConfig.findUnique({ where: { id: this.PLATFORM_ID } });
+    if (!c) {
+      return { enabled: false, activeEnvironment: 'sandbox', sandbox: { clientId: '', hasSecret: false }, prod: { clientId: '', hasSecret: false } };
+    }
+    return {
+      enabled: c.enabled,
+      activeEnvironment: c.activeEnvironment,
+      sandbox: { clientId: c.sandboxClientId ?? '', hasSecret: Boolean(c.sandboxClientSecretEnc) },
+      prod: { clientId: c.prodClientId ?? '', hasSecret: Boolean(c.prodClientSecretEnc) },
+      updatedAt: c.updatedAt,
+    };
+  }
+
+  async upsertPlatformConfig(data: {
+    enabled?: boolean;
+    activeEnvironment?: string;
+    sandboxClientId?: string;
+    sandboxClientSecret?: string;
+    prodClientId?: string;
+    prodClientSecret?: string;
+  }) {
+    if (data.activeEnvironment && !['sandbox', 'prod'].includes(data.activeEnvironment)) {
+      throw new BadRequestException('activeEnvironment debe ser "sandbox" o "prod"');
+    }
+    const patch = {
+      ...(data.enabled !== undefined ? { enabled: data.enabled } : {}),
+      ...(data.activeEnvironment ? { activeEnvironment: data.activeEnvironment } : {}),
+      ...(data.sandboxClientId !== undefined ? { sandboxClientId: data.sandboxClientId } : {}),
+      ...(data.sandboxClientSecret ? { sandboxClientSecretEnc: encryptSecret(data.sandboxClientSecret) } : {}),
+      ...(data.prodClientId !== undefined ? { prodClientId: data.prodClientId } : {}),
+      ...(data.prodClientSecret ? { prodClientSecretEnc: encryptSecret(data.prodClientSecret) } : {}),
+    };
+    await this.prisma.platformEcfConfig.upsert({
+      where: { id: this.PLATFORM_ID },
+      create: { id: this.PLATFORM_ID, ...patch },
+      update: patch,
+    });
+    // credenciales cambiaron → invalidar ambos tokens cacheados
+    this.pronesoft.invalidateToken('sandbox');
+    this.pronesoft.invalidateToken('prod');
+    return this.getPlatformConfig();
+  }
+
+  /** Resuelve la credencial matriz activa; lanza si no está configurada. */
+  private async resolveMatrizCreds() {
+    const c = await this.prisma.platformEcfConfig.findUnique({ where: { id: this.PLATFORM_ID } });
+    if (!c?.enabled) throw new BadRequestException('e-CF de plataforma no configurado/deshabilitado');
+    const env = c.activeEnvironment;
+    const clientId = env === 'prod' ? c.prodClientId : c.sandboxClientId;
+    const secretEnc = env === 'prod' ? c.prodClientSecretEnc : c.sandboxClientSecretEnc;
+    if (!clientId || !secretEnc) {
+      throw new BadRequestException(`Faltan credenciales de Pronesoft para el ambiente ${env}`);
+    }
+    return { environment: env, clientId, clientSecret: decryptSecret(secretEnc) };
+  }
+
+  // ─────────────────── config e-CF por comercio (vínculo) ───────────────────
 
   async getConfig(tenantId: string) {
     const config = await this.prisma.tenantEcfConfig.findUnique({ where: { tenantId } });
-    if (!config) return { enabled: false, environment: 'sandbox', clientId: '', hasSecret: false };
+    const platform = await this.prisma.platformEcfConfig.findUnique({ where: { id: this.PLATFORM_ID } });
     return {
-      enabled: config.enabled,
-      environment: config.environment,
-      clientId: config.clientId,
-      hasSecret: Boolean(config.clientSecretEnc),
-      updatedAt: config.updatedAt,
+      enabled: config?.enabled ?? false,
+      pronesoftBusinessId: config?.pronesoftBusinessId ?? null,
+      pronesoftRnc: config?.pronesoftRnc ?? null,
+      platformEnabled: platform?.enabled ?? false,
+      platformEnvironment: platform?.activeEnvironment ?? 'sandbox',
+      updatedAt: config?.updatedAt,
     };
   }
 
   async upsertConfig(
     tenantId: string,
-    data: { enabled?: boolean; environment?: string; clientId?: string; clientSecret?: string },
+    data: { enabled?: boolean; pronesoftBusinessId?: string | null; pronesoftRnc?: string | null },
   ) {
-    if (data.environment && !['sandbox', 'prod'].includes(data.environment)) {
-      throw new BadRequestException('environment must be "sandbox" or "prod"');
-    }
-
-    const existing = await this.prisma.tenantEcfConfig.findUnique({ where: { tenantId } });
-
-    if (!existing && (!data.clientId || !data.clientSecret)) {
-      throw new BadRequestException(
-        'clientId y clientSecret son requeridos para configurar e-CF por primera vez',
-      );
-    }
-
-    const secretEnc = data.clientSecret ? encryptSecret(data.clientSecret) : undefined;
-
-    // No usamos upsert: Prisma valida la rama `create` aunque se tome `update`,
-    // y clientSecretEnc es obligatorio en create. Al togglear enabled/environment
-    // sin reenviar el secret, upsert fallaría. Create solo cuando no existe.
-    const config = existing
-      ? await this.prisma.tenantEcfConfig.update({
-          where: { tenantId },
-          data: {
-            ...(data.enabled !== undefined ? { enabled: data.enabled } : {}),
-            ...(data.environment ? { environment: data.environment } : {}),
-            ...(data.clientId ? { clientId: data.clientId } : {}),
-            ...(secretEnc ? { clientSecretEnc: secretEnc } : {}),
-          },
-        })
-      : await this.prisma.tenantEcfConfig.create({
-          data: {
-            tenantId,
-            enabled: data.enabled ?? false,
-            environment: data.environment ?? 'sandbox',
-            clientId: data.clientId!,
-            clientSecretEnc: secretEnc!,
-          },
-        });
-
-    // Credentials changed → drop any cached token.
-    this.pronesoft.invalidateToken(tenantId);
-
-    return this.getConfigView(config);
+    const patch = {
+      ...(data.enabled !== undefined ? { enabled: data.enabled } : {}),
+      ...(data.pronesoftBusinessId !== undefined ? { pronesoftBusinessId: data.pronesoftBusinessId || null } : {}),
+      ...(data.pronesoftRnc !== undefined ? { pronesoftRnc: data.pronesoftRnc || null } : {}),
+    };
+    const config = await this.prisma.tenantEcfConfig.upsert({
+      where: { tenantId },
+      create: { tenantId, ...patch },
+      update: patch,
+    });
+    return {
+      enabled: config.enabled,
+      pronesoftBusinessId: config.pronesoftBusinessId,
+      pronesoftRnc: config.pronesoftRnc,
+    };
   }
 
-  private getConfigView(config: { enabled: boolean; environment: string; clientId: string }) {
-    return { enabled: config.enabled, environment: config.environment, clientId: config.clientId };
+  /** Traduce errores de Pronesoft a mensajes HTTP legibles (en vez de un 500 crudo). */
+  private mapPronesoftError(err: unknown): never {
+    if (err instanceof PronesoftApiError) {
+      if (err.status === 401) {
+        throw new BadRequestException('Credenciales de Pronesoft inválidas o sin permiso. Verifica el clientId/secret de la matriz y sus scopes.');
+      }
+      if (err.status === 403) {
+        throw new BadRequestException('Pronesoft rechazó la operación (403): la empresa no está asociada o falta un scope.');
+      }
+      throw new BadRequestException(`Pronesoft respondió ${err.status}: ${err.message}`);
+    }
+    throw err;
+  }
+
+  /** Lista las empresas asociadas de la cuenta matriz (para vincular comercios). */
+  async listAssociatedCompanies() {
+    const creds = await this.resolveMatrizCreds();
+    try {
+      const res = await this.pronesoft.listAssociatedCompanies(creds);
+      return Array.isArray(res) ? res : ((res.data as unknown[]) ?? []);
+    } catch (err) {
+      this.mapPronesoftError(err);
+    }
+  }
+
+  async tenantSequences(tenantId: string, type?: string) {
+    const creds = await this.resolveMatrizCreds();
+    const link = await this.prisma.tenantEcfConfig.findUnique({ where: { tenantId } });
+    try {
+      return await this.pronesoft.getSequences(creds, link?.pronesoftBusinessId ?? null, type);
+    } catch (err) {
+      this.mapPronesoftError(err);
+    }
+  }
+
+  async createTenantSequence(tenantId: string, body: Record<string, unknown>) {
+    const creds = await this.resolveMatrizCreds();
+    const link = await this.prisma.tenantEcfConfig.findUnique({ where: { tenantId } });
+    if (!link?.pronesoftBusinessId) throw new BadRequestException('El comercio no está vinculado a una empresa asociada');
+    try {
+      return await this.pronesoft.createSequence(creds, link.pronesoftBusinessId, body);
+    } catch (err) {
+      this.mapPronesoftError(err);
+    }
   }
 
   // ───────────────────────── enqueue (post-commit) ─────────────────────────
@@ -121,10 +199,12 @@ export class EcfService {
   async enqueueSale(sale: { id: string; tenantId: string; ncfType: NcfType }) {
     if (!FISCAL_NCF_TYPES.includes(sale.ncfType)) return;
 
-    const config = await this.prisma.tenantEcfConfig.findUnique({
-      where: { tenantId: sale.tenantId },
-    });
-    if (!config?.enabled) return;
+    const [platform, config] = await Promise.all([
+      this.prisma.platformEcfConfig.findUnique({ where: { id: this.PLATFORM_ID } }),
+      this.prisma.tenantEcfConfig.findUnique({ where: { tenantId: sale.tenantId } }),
+    ]);
+    // Requiere plataforma habilitada Y el comercio habilitado para e-CF.
+    if (!platform?.enabled || !config?.enabled) return;
 
     await this.prisma.$transaction([
       this.prisma.ecfSubmission.upsert({
@@ -197,15 +277,8 @@ export class EcfService {
         const config = await this.prisma.tenantEcfConfig.findUnique({ where: { tenantId: sub.tenantId } });
         if (!config?.enabled) continue;
 
-        const res = await this.pronesoft.status(
-          {
-            tenantId: config.tenantId,
-            environment: config.environment,
-            clientId: config.clientId,
-            clientSecret: decryptSecret(config.clientSecretEnc),
-          },
-          sub.documentId!,
-        );
+        const creds = await this.resolveMatrizCreds();
+        const res = await this.pronesoft.status(creds, sub.documentId!, config.pronesoftBusinessId);
 
         const legalStatus = (res.legalStatus as string) ?? null;
         const trackId = (res.trackId as string) ?? sub.trackId ?? null;
@@ -267,6 +340,7 @@ export class EcfService {
       });
       if (!config?.enabled) throw new Error('e-CF deshabilitado para el tenant');
 
+      const creds = await this.resolveMatrizCreds();
       const payload = this.buildPayload(sale);
 
       // Guardar el payload antes de enviar: queda inspeccionable aunque el envío
@@ -276,15 +350,8 @@ export class EcfService {
         data: { payload: payload as Prisma.InputJsonValue },
       });
 
-      const response = await this.pronesoft.submit(
-        {
-          tenantId: config.tenantId,
-          environment: config.environment,
-          clientId: config.clientId,
-          clientSecret: decryptSecret(config.clientSecretEnc),
-        },
-        payload,
-      );
+      // Emite en nombre de la empresa asociada (x-tenant-id) con la credencial matriz.
+      const response = await this.pronesoft.submit(creds, payload, config.pronesoftBusinessId);
 
       // Respuesta 201: { id (uuid Pronesoft), status:"REGISTERED", encf, trackId? ... }.
       // El trackId de la DGII llega después al consultar estado.

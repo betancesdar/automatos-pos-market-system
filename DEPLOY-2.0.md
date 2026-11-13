@@ -76,14 +76,25 @@ Nota RBAC: los permisos van embebidos en el JWT; **los usuarios deben re-loguear
 tras el deploy para recibir sus permisos (los tokens viejos caen a los permisos del
 rol base automáticamente, así que nada se rompe mientras tanto).
 
-## 5.2 e-CF Pronesoft (implementación real, docs.ecf.pronesoft.com)
-Autenticación **OAuth 2.0 client credentials** (no API key). El `clientId`/`clientSecret`
-se crean en el portal de Pronesoft (sección **Apps → Crear App**), sandbox y producción
-por separado.
-- **Sandbox**: portal https://ecf.sandbox.pronesoft.com · API `https://api.ecf.sandbox.pronesoft.com/api/v1` · ambiente `TesteCF` (va en la URL). RNC de prueba con prefijo `SBX`, sin certificado.
-- **Producción**: API `https://api.ecf.pronesoft.com/api/v1` · ambiente `eCF`. **Requiere subir el certificado digital .p12/.pfx** de la DGII vía `POST /{rnc}/certificates` (multipart `file` + `password`) y administrar las secuencias de e-NCF en el portal. Sin certificado no se puede emitir en producción.
-- Configurar por tenant: SuperAdmin → tenant → Detalles & Config → Fiscal → e-CF (clientId/clientSecret, ambiente), o `PUT /ecf/config`.
-- **Qué llama a Pronesoft**: solo ventas con comprobante fiscal (CONSUMIDOR_FINAL→e-CF 32, CREDITO_FISCAL→31, GUBERNAMENTAL→45, REGISTRO_UNICO_INGRESO→32). Las ventas de **contado sin comprobante** (VENTA_RAPIDA) y SIN_NCF **no** llaman a la API. La venta nunca falla por e-CF (cola + reintentos + consulta de estado DGII).
+## 5.2 e-CF Pronesoft — MODELO MATRIZ / EMPRESAS ASOCIADAS
+Autenticación **OAuth 2.0 client credentials** (no API key). **UNA sola App de la matriz**
+(la plataforma) opera por **todas** las empresas asociadas con el mismo token + el header
+`x-tenant-id`. No hay credenciales por comercio.
+- **Credencial matriz (una sola)**: SuperAdmin → botón **⚡ Pronesoft (matriz)** → cargar
+  `clientId`/`clientSecret` de sandbox y/o producción + ambiente activo. Botón "Probar conexión"
+  lista las empresas asociadas. Endpoint: `GET/PUT /superadmin/ecf/platform-config`.
+- **Vincular cada comercio**: SuperAdmin → tenant → Detalles & Config → Fiscal → selecciona la
+  **empresa asociada** (lista traída de `GET /superadmin/ecf/associated-companies`, auto-match por
+  RNC) y habilita e-CF. Se guarda el `id` (UUID) de la asociada como `x-tenant-id`.
+- **Secuencias e-NCF** por asociada: en sandbox automáticas; en producción se crean con el rango
+  que da el comercio (`POST /superadmin/tenants/:id/ecf/sequences`) o en el portal de Pronesoft.
+- **Sandbox**: `https://api.ecf.sandbox.pronesoft.com/api/v1`, ambiente `TesteCF`, RNC `SBX…`, sin certificado.
+- **Producción**: `https://api.ecf.pronesoft.com/api/v1`, ambiente `eCF`. Cada empresa asociada
+  requiere su **certificado .p12/.pfx** (`POST /{rnc}/certificates`, multipart file+password).
+- **Qué llama a Pronesoft**: solo ventas con comprobante fiscal (CONSUMIDOR_FINAL→e-CF 32,
+  CREDITO_FISCAL→31, GUBERNAMENTAL→45, REGISTRO_UNICO_INGRESO→32). Las ventas de **contado sin
+  comprobante** (VENTA_RAPIDA) y SIN_NCF **no** llaman. La venta nunca falla por e-CF (cola +
+  reintentos + consulta de estado DGII). Requiere plataforma habilitada Y comercio habilitado+vinculado.
 - Variable `ECF_SECRET_KEY` cifra los clientSecret (AES-256-GCM).
 
 ## 6. Pendiente / deuda técnica (no bloquea el lanzamiento)

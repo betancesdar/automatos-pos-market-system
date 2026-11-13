@@ -368,15 +368,33 @@ model OrderDailyCounter {
 // Facturación electrónica e-CF (Pronesoft)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Credencial de la App MATRIZ de Pronesoft (una sola para toda la plataforma).
+// La maneja el SuperAdmin; opera por todas las empresas asociadas vía x-tenant-id.
+model PlatformEcfConfig {
+  id                    String   @id @default("default")
+  enabled               Boolean  @default(false)
+  activeEnvironment     String   @default("sandbox") // "sandbox" | "prod"
+  sandboxClientId       String?
+  sandboxClientSecretEnc String? // AES-256-GCM (ECF_SECRET_KEY)
+  prodClientId          String?
+  prodClientSecretEnc   String?
+  updatedAt             DateTime @updatedAt
+}
+
+// Vínculo e-CF de cada comercio con su empresa asociada en la cuenta matriz.
+// Ya NO guarda credenciales: usa la credencial matriz + x-tenant-id.
 model TenantEcfConfig {
-  tenantId        String   @id
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  enabled         Boolean  @default(false)
-  environment     String   @default("sandbox") // "sandbox" | "prod"
-  clientId        String
-  // AES-256-GCM encrypted with ECF_SECRET_KEY env var
-  clientSecretEnc String
-  updatedAt       DateTime @updatedAt
+  tenantId           String   @id
+  tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  enabled            Boolean  @default(false)
+  // id (UUID) de la empresa asociada en Pronesoft → se envía como header x-tenant-id
+  pronesoftBusinessId String?
+  pronesoftRnc       String?
+  environment        String   @default("sandbox") // informativo (el ambiente lo fija la matriz)
+  // Deprecados: credenciales por comercio (ya no se usan; el ambiente es de la matriz)
+  clientId           String?
+  clientSecretEnc    String?
+  updatedAt          DateTime @updatedAt
 }
 
 model EcfSubmission {

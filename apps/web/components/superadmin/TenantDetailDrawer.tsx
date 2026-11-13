@@ -65,8 +65,10 @@ export function TenantDetailDrawer({
   // Fiscal
   const [sequences, setSequences] = useState<NcfSequence[]>([]);
   const [seqForm, setSeqForm] = useState({ type: 'CONSUMIDOR_FINAL', prefix: 'B02', nextValue: '1' });
-  const [ecf, setEcf] = useState<{ enabled: boolean; environment: string; clientId: string; hasSecret: boolean } | null>(null);
-  const [ecfForm, setEcfForm] = useState({ enabled: false, environment: 'sandbox', clientId: '', clientSecret: '' });
+  const [ecf, setEcf] = useState<{ enabled: boolean; pronesoftBusinessId: string | null; pronesoftRnc: string | null; platformEnabled: boolean; platformEnvironment: string } | null>(null);
+  const [ecfForm, setEcfForm] = useState({ enabled: false, pronesoftBusinessId: '' });
+  const [associated, setAssociated] = useState<{ id: string; name: string; rnc: string }[]>([]);
+  const [ecfSeqs, setEcfSeqs] = useState<unknown[] | null>(null);
 
   // Plan & modo
   const [plans, setPlans] = useState<PlanRow[]>([]);
@@ -87,13 +89,20 @@ export function TenantDetailDrawer({
     try {
       const [seqs, cfg] = await Promise.all([
         superadminFetch<NcfSequence[]>(`/superadmin/tenants/${tenant.id}/ncf-sequences`),
-        superadminFetch<{ enabled: boolean; environment: string; clientId: string; hasSecret: boolean }>(
+        superadminFetch<{ enabled: boolean; pronesoftBusinessId: string | null; pronesoftRnc: string | null; platformEnabled: boolean; platformEnvironment: string }>(
           `/superadmin/tenants/${tenant.id}/ecf-config`,
         ),
       ]);
       setSequences(seqs);
       setEcf(cfg);
-      setEcfForm({ enabled: cfg.enabled, environment: cfg.environment, clientId: cfg.clientId, clientSecret: '' });
+      setEcfForm({ enabled: cfg.enabled, pronesoftBusinessId: cfg.pronesoftBusinessId ?? '' });
+      // Empresas asociadas de la matriz (solo si la plataforma está configurada).
+      if (cfg.platformEnabled) {
+        try {
+          const list = await superadminFetch<{ id: string; name: string; rnc: string }[]>('/superadmin/ecf/associated-companies');
+          setAssociated(Array.isArray(list) ? list : []);
+        } catch { setAssociated([]); }
+      }
     } catch (e) { fail(e, 'Error cargando configuración fiscal'); }
   }, [tenant.id]);
 
@@ -150,17 +159,16 @@ export function TenantDetailDrawer({
     setSaving(true);
     setError('');
     try {
+      const picked = associated.find((a) => a.id === ecfForm.pronesoftBusinessId);
       await superadminFetch(`/superadmin/tenants/${tenant.id}/ecf-config`, {
         method: 'PUT',
         body: JSON.stringify({
           enabled: ecfForm.enabled,
-          environment: ecfForm.environment,
-          clientId: ecfForm.clientId || undefined,
-          clientSecret: ecfForm.clientSecret || undefined,
+          pronesoftBusinessId: ecfForm.pronesoftBusinessId || null,
+          pronesoftRnc: picked?.rnc || null,
         }),
       });
-      setEcfForm((f) => ({ ...f, clientSecret: '' }));
-      flash('Configuración e-CF guardada');
+      flash('Vínculo e-CF guardado');
       loadFiscal();
     } catch (e) { fail(e, 'Error guardando e-CF'); }
     finally { setSaving(false); }
@@ -297,31 +305,75 @@ export function TenantDetailDrawer({
               </div>
 
               <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-4">
-                <p className="mb-3 text-xs font-bold uppercase text-slate-500">
+                <p className="mb-1 text-xs font-bold uppercase text-slate-500">
                   Facturación Electrónica e-CF (Pronesoft)
-                  {ecf?.hasSecret && <span className="ml-2 text-emerald-400">credenciales guardadas ✓</span>}
                 </p>
-                <div className="grid grid-cols-2 gap-3">
-                  <button onClick={() => setEcfForm({ ...ecfForm, enabled: !ecfForm.enabled })}
-                    className={`rounded-lg border px-3 py-2 text-sm font-bold ${
-                      ecfForm.enabled ? 'border-emerald-700 bg-emerald-950 text-emerald-300' : 'border-slate-700 text-slate-500'
-                    }`}>
-                    {ecfForm.enabled ? '✓ Habilitado' : 'Deshabilitado'}
-                  </button>
-                  <select value={ecfForm.environment} onChange={(e) => setEcfForm({ ...ecfForm, environment: e.target.value })} className={input}>
-                    <option value="sandbox">Sandbox (pruebas)</option>
-                    <option value="prod">Producción</option>
-                  </select>
-                  <input value={ecfForm.clientId} onChange={(e) => setEcfForm({ ...ecfForm, clientId: e.target.value })}
-                    placeholder="Client ID" className={input} />
-                  <input type="password" value={ecfForm.clientSecret}
-                    onChange={(e) => setEcfForm({ ...ecfForm, clientSecret: e.target.value })}
-                    placeholder={ecf?.hasSecret ? '•••••• (vacío = no cambiar)' : 'Client Secret'} className={input} />
-                </div>
-                <button onClick={saveEcf} disabled={saving}
-                  className="mt-3 rounded-lg bg-violet-600 px-4 py-2 text-sm font-bold text-white hover:bg-violet-500 disabled:opacity-50">
-                  Guardar e-CF
-                </button>
+                {!ecf?.platformEnabled ? (
+                  <p className="rounded-lg border border-amber-800 bg-amber-950 px-3 py-2 text-sm text-amber-300">
+                    Configura primero la credencial MATRIZ en el botón «⚡ Pronesoft (matriz)» del panel principal.
+                  </p>
+                ) : (
+                  <>
+                    <p className="mb-3 text-xs text-slate-400">
+                      Ambiente de la matriz: <span className="font-bold text-slate-200">{ecf.platformEnvironment}</span>.
+                      Vincula este comercio con su empresa asociada en Pronesoft.
+                    </p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button onClick={() => setEcfForm({ ...ecfForm, enabled: !ecfForm.enabled })}
+                        className={`rounded-lg border px-3 py-2 text-sm font-bold ${
+                          ecfForm.enabled ? 'border-emerald-700 bg-emerald-950 text-emerald-300' : 'border-slate-700 text-slate-500'
+                        }`}>
+                        {ecfForm.enabled ? '✓ e-CF Habilitado' : 'e-CF Deshabilitado'}
+                      </button>
+                      <select
+                        value={ecfForm.pronesoftBusinessId}
+                        onChange={(e) => setEcfForm({ ...ecfForm, pronesoftBusinessId: e.target.value })}
+                        className={input}>
+                        <option value="">— Empresa asociada —</option>
+                        {associated.map((a) => (
+                          <option key={a.id} value={a.id}>{a.name} ({a.rnc})</option>
+                        ))}
+                      </select>
+                    </div>
+                    {associated.some((a) => a.rnc?.replace(/\D/g, '') === tenant.rnc?.replace(/\D/g, '')) &&
+                      !ecfForm.pronesoftBusinessId && (
+                        <button
+                          onClick={() => {
+                            const m = associated.find((a) => a.rnc?.replace(/\D/g, '') === tenant.rnc?.replace(/\D/g, ''));
+                            if (m) setEcfForm({ ...ecfForm, pronesoftBusinessId: m.id });
+                          }}
+                          className="mt-2 text-xs font-semibold text-cyan-400 hover:text-cyan-300">
+                          ↪ Vincular automáticamente por RNC ({tenant.rnc})
+                        </button>
+                      )}
+                    <button onClick={saveEcf} disabled={saving}
+                      className="mt-3 rounded-lg bg-violet-600 px-4 py-2 text-sm font-bold text-white hover:bg-violet-500 disabled:opacity-50">
+                      Guardar vínculo e-CF
+                    </button>
+
+                    {ecf.pronesoftBusinessId && (
+                      <div className="mt-4 border-t border-slate-700 pt-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-bold uppercase text-slate-500">Secuencias e-NCF</p>
+                          <button
+                            onClick={async () => {
+                              try { setEcfSeqs((await superadminFetch<{ data?: unknown[] }>(`/superadmin/tenants/${tenant.id}/ecf/sequences`)).data ?? []); }
+                              catch (e) { fail(e, 'Error consultando secuencias'); }
+                            }}
+                            className="rounded-lg border border-slate-600 px-2 py-1 text-xs text-slate-300 hover:bg-slate-700">
+                            Consultar saldo
+                          </button>
+                        </div>
+                        {ecfSeqs && (
+                          <pre className="mt-2 max-h-40 overflow-auto rounded bg-slate-950 p-2 text-[11px] text-slate-400">
+                            {JSON.stringify(ecfSeqs, null, 1)}
+                          </pre>
+                        )}
+                        <p className="mt-1 text-[11px] text-slate-500">En sandbox las secuencias son automáticas; en producción se crean con el rango que te da el comercio.</p>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </>
           )}

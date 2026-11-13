@@ -65,9 +65,25 @@ class UpsertPlanDto {
 
 class UpsertEcfConfigDto {
   enabled?: boolean;
-  environment?: string;
-  clientId?: string;
-  clientSecret?: string;
+  pronesoftBusinessId?: string | null;
+  pronesoftRnc?: string | null;
+}
+
+class PlatformEcfConfigDto {
+  enabled?: boolean;
+  activeEnvironment?: string;
+  sandboxClientId?: string;
+  sandboxClientSecret?: string;
+  prodClientId?: string;
+  prodClientSecret?: string;
+}
+
+class CreateSequenceDto {
+  type!: string;
+  from!: number;
+  to!: number;
+  quantity?: number;
+  expiration?: string;
 }
 
 @Controller('superadmin')
@@ -191,7 +207,29 @@ export class SuperadminController {
     return this.superadminService.deleteNcfSequence(id, type);
   }
 
-  // ── Config e-CF (Pronesoft) por tenant ──
+  // ── Config e-CF MATRIZ (plataforma) ──
+
+  @Get('ecf/platform-config')
+  getPlatformEcf() {
+    return this.ecfService.getPlatformConfig();
+  }
+
+  @Put('ecf/platform-config')
+  upsertPlatformEcf(@Body() body: PlatformEcfConfigDto, @Req() req: Request & { user: TokenPayload }) {
+    this.audit.log(this.actor(req), 'PLATFORM_ECF_UPDATE', null, {
+      enabled: body.enabled,
+      activeEnvironment: body.activeEnvironment,
+    });
+    return this.ecfService.upsertPlatformConfig(body);
+  }
+
+  /** Lista las empresas asociadas de la cuenta matriz en Pronesoft (para vincular). */
+  @Get('ecf/associated-companies')
+  associatedCompanies() {
+    return this.ecfService.listAssociatedCompanies();
+  }
+
+  // ── Vínculo e-CF por comercio + secuencias ──
 
   @Get('tenants/:id/ecf-config')
   getEcfConfig(@Param('id') id: string) {
@@ -204,11 +242,26 @@ export class SuperadminController {
     @Body() body: UpsertEcfConfigDto,
     @Req() req: Request & { user: TokenPayload },
   ) {
-    this.audit.log(this.actor(req), 'ECF_CONFIG_UPDATE', id, {
+    this.audit.log(this.actor(req), 'TENANT_ECF_LINK', id, {
       enabled: body.enabled,
-      environment: body.environment,
+      pronesoftBusinessId: body.pronesoftBusinessId,
     });
     return this.ecfService.upsertConfig(id, body);
+  }
+
+  @Get('tenants/:id/ecf/sequences')
+  tenantSequences(@Param('id') id: string, @Query('type') type?: string) {
+    return this.ecfService.tenantSequences(id, type);
+  }
+
+  @Post('tenants/:id/ecf/sequences')
+  createTenantSequence(
+    @Param('id') id: string,
+    @Body() body: CreateSequenceDto,
+    @Req() req: Request & { user: TokenPayload },
+  ) {
+    this.audit.log(this.actor(req), 'ECF_SEQUENCE_CREATE', id, { type: body.type, from: body.from, to: body.to });
+    return this.ecfService.createTenantSequence(id, { ...body });
   }
 
   // ── Planes ──

@@ -7,6 +7,7 @@ import { useAuth } from '../../lib/auth-context';
 import { superadminFetch } from '../../lib/api';
 import { TenantDetailDrawer } from '../../components/superadmin/TenantDetailDrawer';
 import { PlansModal, AuditModal } from '../../components/superadmin/PlansModal';
+import { PronesoftMatrizModal } from '../../components/superadmin/PronesoftMatrizModal';
 
 interface Metrics {
   totalTenants: number;
@@ -58,6 +59,7 @@ export default function SuperadminPage() {
   const [detailTenant, setDetailTenant] = useState<TenantRow | null>(null);
   const [showPlans, setShowPlans] = useState(false);
   const [showAudit, setShowAudit] = useState(false);
+  const [showPronesoft, setShowPronesoft] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'SUSPENDED' | 'EXPIRED'>('ALL');
   // Posición del menú de acciones (portal) — evita el recorte del overflow de la tabla.
@@ -296,6 +298,9 @@ export default function SuperadminPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-bold">Todos los Comercios</h2>
           <div className="flex flex-wrap gap-2">
+            <button onClick={() => setShowPronesoft(true)} className="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">
+              ⚡ Pronesoft (matriz)
+            </button>
             <button onClick={() => setShowAudit(true)} className="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">
               📜 Auditoría
             </button>
@@ -660,6 +665,7 @@ export default function SuperadminPage() {
       )}
       {showPlans && <PlansModal onClose={() => setShowPlans(false)} />}
       {showAudit && <AuditModal onClose={() => setShowAudit(false)} />}
+      {showPronesoft && <PronesoftMatrizModal onClose={() => setShowPronesoft(false)} />}
     </div>
   );
 }
