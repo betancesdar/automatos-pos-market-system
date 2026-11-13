@@ -176,6 +176,47 @@ export class AccountingController {
     return this.accountingService.deletePurchase(tenantId, id);
   }
 
+  // ── Movimientos / asientos manuales ──
+  @Get('entries')
+  listEntries(
+    @TenantId() tenantId: string,
+    @Query('year') year?: string,
+    @Query('month') month?: string,
+  ) {
+    return this.accountingService.listEntries(tenantId, {
+      year: year ? parseInt(year, 10) : undefined,
+      month: month ? parseInt(month, 10) : undefined,
+    });
+  }
+
+  @RequirePermissions('accounting.manage')
+  @Post('entries')
+  createEntry(
+    @TenantId() tenantId: string,
+    @Body() body: { date: string; type: 'INCOME' | 'EXPENSE' | 'ADJUSTMENT'; category: string; amount: number; description?: string },
+    @Req() req: Request & { user: TokenPayload },
+  ) {
+    return this.accountingService.createEntry(tenantId, req.user.sub, body);
+  }
+
+  @RequirePermissions('accounting.manage')
+  @Delete('entries/:id')
+  deleteEntry(@TenantId() tenantId: string, @Param('id') id: string) {
+    return this.accountingService.deleteEntry(tenantId, id);
+  }
+
+  // ── Drill-down de transacciones ──
+  @Get('transactions')
+  transactions(
+    @TenantId() tenantId: string,
+    @Query('year') year: string,
+    @Query('month') month: string,
+    @Query('kind') kind: string,
+  ) {
+    const { y, m } = parsePeriod(year, month);
+    return this.accountingService.transactions(tenantId, y, m, kind);
+  }
+
   // ── Reportes DGII ──
   @Get('reports/606')
   report606(

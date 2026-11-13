@@ -219,6 +219,84 @@ export class AccountingService {
     }
   }
 
+  // ───────────────────── Asientos / movimientos manuales ─────────────────────
+
+  async listEntries(tenantId: string, filters: { year?: number; month?: number }) {
+    const where: Prisma.AccountingEntryWhereInput = { tenantId };
+    if (filters.year && filters.month) {
+      const { from, to } = monthRange(filters.year, filters.month);
+      where.date = { gte: from, lt: to };
+    }
+    return this.prisma.accountingEntry.findMany({ where, orderBy: { date: 'desc' }, take: 300 });
+  }
+
+  async createEntry(
+    tenantId: string,
+    createdById: string,
+    data: { date: string; type: 'INCOME' | 'EXPENSE' | 'ADJUSTMENT'; category: string; amount: number; description?: string },
+  ) {
+    if (!data.date) throw new BadRequestException('La fecha es obligatoria');
+    if (!data.category?.trim()) throw new BadRequestException('La categoría es obligatoria');
+    if (!data.amount || data.amount <= 0) throw new BadRequestException('El monto debe ser mayor que cero');
+    const date = new Date(data.date);
+    await this.assertPeriodOpen(tenantId, date);
+    return this.prisma.accountingEntry.create({
+      data: {
+        tenantId,
+        date,
+        type: data.type,
+        category: data.category.trim(),
+        amount: new Prisma.Decimal(data.amount),
+        description: data.description?.trim() || null,
+        createdById,
+      },
+    });
+  }
+
+  async deleteEntry(tenantId: string, id: string) {
+    const entry = await this.prisma.accountingEntry.findFirst({ where: { id, tenantId } });
+    if (!entry) throw new NotFoundException('Movimiento no encontrado');
+    await this.assertPeriodOpen(tenantId, entry.date);
+    await this.prisma.accountingEntry.delete({ where: { id } });
+    return { deleted: true };
+  }
+
+  /** Drill-down: transacciones que componen una cifra del mes. */
+  async transactions(tenantId: string, year: number, month: number, kind: string) {
+    const { from, to } = monthRange(year, month);
+    if (kind === 'sales') {
+      const sales = await this.prisma.sale.findMany({
+        where: { tenantId, status: { not: 'VOIDED' }, createdAt: { gte: from, lt: to } },
+        select: { id: true, invoiceNumber: true, ncf: true, total: true, itbis: true, paymentMethod: true, clientName: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      return { kind, rows: sales };
+    }
+    if (kind === 'purchases') {
+      const rows = await this.prisma.purchase.findMany({
+        where: { tenantId, date: { gte: from, lt: to } },
+        orderBy: { date: 'desc' },
+      });
+      return { kind, rows };
+    }
+    if (kind === 'credit-payments') {
+      const rows = await this.prisma.creditPayment.findMany({
+        where: { tenantId, createdAt: { gte: from, lt: to } },
+        select: { id: true, amount: true, method: true, isDownPayment: true, createdAt: true, creditSale: { select: { customer: { select: { name: true } } } } },
+        orderBy: { createdAt: 'desc' },
+      });
+      return { kind, rows };
+    }
+    if (kind === 'entries') {
+      const rows = await this.prisma.accountingEntry.findMany({
+        where: { tenantId, date: { gte: from, lt: to } },
+        orderBy: { date: 'desc' },
+      });
+      return { kind, rows };
+    }
+    throw new BadRequestException('Tipo de transacción inválido');
+  }
+
   // ───────────────────── Reportes DGII ─────────────────────
 
   /** Formato 606 (compras) — filas + TXT pipe-delimited para carga en DGII. */
@@ -529,7 +607,7 @@ export class AccountingService {
     const month = now.getUTCMonth() + 1;
     const { from, to } = monthRange(year, month);
 
-    const [itbis, pendingRecs, failedEcf, period] = await Promise.all([
+    const [itbis, pendingRecs, failedEcf, period, cartera, cobradoMes, entriesAgg] = await Promise.all([
       this.itbisSummary(tenantId, year, month),
       this.prisma.cashReconciliation.count({
         where: { tenantId, status: 'PENDING_REVIEW' },
@@ -540,7 +618,23 @@ export class AccountingService {
       this.prisma.accountingPeriod.findUnique({
         where: { tenantId_year_month: { tenantId, year, month } },
       }),
+      this.prisma.creditSale.aggregate({
+        where: { tenantId, status: { in: ['OPEN', 'OVERDUE'] } },
+        _sum: { balance: true },
+      }),
+      this.prisma.creditPayment.aggregate({
+        where: { tenantId, createdAt: { gte: from, lt: to } },
+        _sum: { amount: true },
+      }),
+      this.prisma.accountingEntry.groupBy({
+        by: ['type'],
+        where: { tenantId, date: { gte: from, lt: to } },
+        _sum: { amount: true },
+      }),
     ]);
+
+    const entriesByType: Record<string, number> = {};
+    for (const e of entriesAgg) entriesByType[e.type] = Number(e._sum.amount ?? 0);
 
     const salesWithoutNcf = await this.prisma.sale.count({
       where: {
@@ -554,6 +648,15 @@ export class AccountingService {
 
     return {
       ...itbis,
+      cartera: {
+        porCobrar: Number(cartera._sum.balance ?? 0),
+        cobradoMes: Number(cobradoMes._sum.amount ?? 0),
+      },
+      movimientosManuales: {
+        ingresos: entriesByType.INCOME ?? 0,
+        gastos: entriesByType.EXPENSE ?? 0,
+        ajustes: entriesByType.ADJUSTMENT ?? 0,
+      },
       alertas: {
         conciliacionesPendientes: pendingRecs,
         ecfFallidos: failedEcf,

@@ -5,7 +5,7 @@ import { AdminShell } from '../../../components/admin/AdminShell';
 import { useAuth } from '../../../lib/auth-context';
 import { apiFetch } from '../../../lib/api';
 
-type Tab = 'dashboard' | 'reconciliations' | 'purchases' | 'reports' | 'periods' | 'ecf';
+type Tab = 'dashboard' | 'reconciliations' | 'purchases' | 'entries' | 'reports' | 'periods' | 'ecf';
 
 interface DashboardData {
   period: string;
@@ -14,6 +14,8 @@ interface DashboardData {
   balance: number;
   aPagar: number;
   aFavor: number;
+  cartera?: { porCobrar: number; cobradoMes: number };
+  movimientosManuales?: { ingresos: number; gastos: number; ajustes: number };
   alertas: {
     conciliacionesPendientes: number;
     ecfFallidos: number;
@@ -21,6 +23,15 @@ interface DashboardData {
   };
   periodoActual: string;
   categoriasGasto: Record<string, string>;
+}
+
+interface AccountingEntry {
+  id: string;
+  date: string;
+  type: 'INCOME' | 'EXPENSE' | 'ADJUSTMENT';
+  category: string;
+  amount: string;
+  description: string | null;
 }
 
 interface Reconciliation {
@@ -124,6 +135,8 @@ export default function AccountingPage() {
   const [purchaseForm, setPurchaseForm] = useState({ ...EMPTY_PURCHASE });
   const [showPurchaseForm, setShowPurchaseForm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [entries, setEntries] = useState<AccountingEntry[]>([]);
+  const [entryForm, setEntryForm] = useState({ date: '', type: 'EXPENSE' as AccountingEntry['type'], category: '', amount: '', description: '' });
 
   const flash = (msg: string) => {
     setNotice(msg);
@@ -171,14 +184,44 @@ export default function AccountingPage() {
     } catch (err) { fail(err, 'Error cargando emisiones e-CF'); }
   }, [tenantId]);
 
+  const loadEntries = useCallback(async () => {
+    if (!tenantId) return;
+    try {
+      setEntries(await apiFetch<AccountingEntry[]>(`/accounting/entries?year=${year}&month=${month}`, tenantId));
+    } catch (err) { fail(err, 'Error cargando movimientos'); }
+  }, [tenantId, year, month]);
+
+  const saveEntry = async () => {
+    setSaving(true); setError('');
+    try {
+      await apiFetch('/accounting/entries', tenantId, {
+        method: 'POST',
+        body: JSON.stringify({
+          date: entryForm.date, type: entryForm.type, category: entryForm.category,
+          amount: parseFloat(entryForm.amount) || 0, description: entryForm.description,
+        }),
+      });
+      setEntryForm({ date: '', type: 'EXPENSE', category: '', amount: '', description: '' });
+      loadEntries(); loadDashboard(); flash('Movimiento registrado');
+    } catch (err) { fail(err, 'Error registrando movimiento'); }
+    finally { setSaving(false); }
+  };
+
+  const deleteEntry = async (id: string) => {
+    if (!confirm('¿Eliminar este movimiento?')) return;
+    try { await apiFetch(`/accounting/entries/${id}`, tenantId, { method: 'DELETE' }); loadEntries(); loadDashboard(); }
+    catch (err) { fail(err, 'Error'); }
+  };
+
   useEffect(() => {
     setError('');
     if (tab === 'dashboard') loadDashboard();
     if (tab === 'reconciliations') loadRecs();
     if (tab === 'purchases') { loadPurchases(); loadDashboard(); }
+    if (tab === 'entries') { loadEntries(); loadDashboard(); }
     if (tab === 'periods') loadPeriods();
     if (tab === 'ecf') loadEcf();
-  }, [tab, loadDashboard, loadRecs, loadPurchases, loadPeriods, loadEcf]);
+  }, [tab, loadDashboard, loadRecs, loadPurchases, loadEntries, loadPeriods, loadEcf]);
 
   // ── actions ──
   const submitReview = async (status: 'APPROVED' | 'OBSERVED') => {
@@ -288,6 +331,7 @@ export default function AccountingPage() {
     { key: 'dashboard', label: '📊 Dashboard' },
     { key: 'reconciliations', label: '💵 Conciliaciones' },
     { key: 'purchases', label: '🧾 Compras/Gastos' },
+    { key: 'entries', label: '📒 Movimientos' },
     { key: 'reports', label: '📑 Reportes DGII' },
     { key: 'periods', label: '🔒 Cierre Mensual' },
     ...(isAdmin ? [{ key: 'ecf' as Tab, label: '⚡ e-CF' }] : []),
@@ -354,6 +398,18 @@ export default function AccountingPage() {
                 accent={dashboard.balance >= 0 ? 'text-red-600' : 'text-emerald-600'}
               />
             </div>
+            {(dashboard.cartera || dashboard.movimientosManuales) && (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <StatCard title="Cartera por cobrar" value={money(dashboard.cartera?.porCobrar ?? 0)}
+                  sub="crédito pendiente" accent="text-indigo-600" />
+                <StatCard title="Cobrado este mes" value={money(dashboard.cartera?.cobradoMes ?? 0)}
+                  sub="abonos de crédito" />
+                <StatCard title="Otros ingresos" value={money(dashboard.movimientosManuales?.ingresos ?? 0)}
+                  sub="movimientos manuales" />
+                <StatCard title="Otros gastos" value={money(dashboard.movimientosManuales?.gastos ?? 0)}
+                  sub="movimientos manuales" accent="text-red-600" />
+              </div>
+            )}
             <div className="rounded-2xl border border-slate-200 bg-white p-5">
               <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-slate-600">Checklist del contable</h3>
               <div className="grid gap-3 sm:grid-cols-3">
@@ -537,6 +593,64 @@ export default function AccountingPage() {
                       <td className="px-4 py-3">
                         <button onClick={() => deletePurchase(p.id)} className="text-red-400 hover:text-red-600">✕</button>
                       </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ── MOVIMIENTOS / ASIENTOS MANUALES ── */}
+        {tab === 'entries' && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-500">
+              Ingresos, gastos o ajustes que no vienen de ventas ni compras (ej. pago de luz sin NCF, ajuste de caja).
+            </p>
+            {isAdmin && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <div className="grid gap-3 md:grid-cols-5">
+                  <input type="date" value={entryForm.date} onChange={(e) => setEntryForm({ ...entryForm, date: e.target.value })}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                  <select value={entryForm.type} onChange={(e) => setEntryForm({ ...entryForm, type: e.target.value as AccountingEntry['type'] })}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                    <option value="EXPENSE">Gasto</option><option value="INCOME">Ingreso</option><option value="ADJUSTMENT">Ajuste</option>
+                  </select>
+                  <input value={entryForm.category} onChange={(e) => setEntryForm({ ...entryForm, category: e.target.value })}
+                    placeholder="Categoría (ej. Luz)" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                  <input type="number" value={entryForm.amount} onChange={(e) => setEntryForm({ ...entryForm, amount: e.target.value })}
+                    placeholder="Monto" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                  <button onClick={saveEntry} disabled={saving || !entryForm.date || !entryForm.category || !entryForm.amount}
+                    className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Registrar</button>
+                </div>
+                <input value={entryForm.description} onChange={(e) => setEntryForm({ ...entryForm, description: e.target.value })}
+                  placeholder="Descripción / soporte (opcional)" className="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              </div>
+            )}
+            <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+              <table className="w-full text-sm">
+                <thead><tr className="border-b border-slate-200 bg-slate-50 text-slate-500">
+                  <th className="px-4 py-3 text-left font-semibold">Fecha</th>
+                  <th className="px-4 py-3 text-left font-semibold">Tipo</th>
+                  <th className="px-4 py-3 text-left font-semibold">Categoría</th>
+                  <th className="px-4 py-3 text-left font-semibold">Descripción</th>
+                  <th className="px-4 py-3 text-right font-semibold">Monto</th>
+                  <th className="px-4 py-3" />
+                </tr></thead>
+                <tbody>
+                  {entries.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">Sin movimientos este mes.</td></tr>}
+                  {entries.map((e) => (
+                    <tr key={e.id} className="border-b border-slate-100">
+                      <td className="px-4 py-2.5">{new Date(e.date).toLocaleDateString('es-DO')}</td>
+                      <td className="px-4 py-2.5">
+                        <span className={`rounded px-2 py-0.5 text-xs font-semibold ${e.type === 'INCOME' ? 'bg-emerald-50 text-emerald-700' : e.type === 'EXPENSE' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-600'}`}>
+                          {e.type === 'INCOME' ? 'Ingreso' : e.type === 'EXPENSE' ? 'Gasto' : 'Ajuste'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5">{e.category}</td>
+                      <td className="px-4 py-2.5 text-slate-500">{e.description ?? '—'}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums font-semibold">{money(Number(e.amount))}</td>
+                      <td className="px-4 py-2.5 text-right">{isAdmin && <button onClick={() => deleteEntry(e.id)} className="text-red-500 hover:text-red-700">✕</button>}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -51,6 +51,7 @@ model Tenant {
   purchases         Purchase[]
   reconciliations   CashReconciliation[]
   accountingPeriods AccountingPeriod[]
+  accountingEntries AccountingEntry[]
   customRoles       CustomRole[]
   customers         Customer[]
   quotes            Quote[]
@@ -472,6 +473,29 @@ model CashReconciliation {
   createdAt     DateTime    @default(now())
 
   @@index([tenantId, status, createdAt])
+}
+
+// Asiento/movimiento contable manual (Fase 6): ingresos, gastos o ajustes que
+// no provienen de ventas ni compras (ej. gasto de luz sin NCF, ajuste de caja).
+enum AccountingEntryType {
+  INCOME
+  EXPENSE
+  ADJUSTMENT
+}
+
+model AccountingEntry {
+  id          String              @id @default(uuid())
+  tenantId    String
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  date        DateTime
+  type        AccountingEntryType
+  category    String
+  amount      Decimal             @db.Decimal(14, 2)
+  description String?
+  createdById String
+  createdAt   DateTime            @default(now())
+
+  @@index([tenantId, date])
 }
 
 // Cierre contable mensual con flujo verificar → aprobar → presentar en DGII
