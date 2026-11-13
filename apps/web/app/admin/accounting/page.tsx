@@ -79,6 +79,8 @@ interface EcfSubmission {
   id: string;
   status: string;
   attempts: number;
+  encf: string | null;
+  legalStatus: string | null;
   trackId: string | null;
   lastError: string | null;
   createdAt: string;
@@ -1023,7 +1025,8 @@ function EcfSection({
               <th className="px-4 py-3">NCF</th>
               <th className="px-4 py-3 text-right">Total</th>
               <th className="px-4 py-3">Estado</th>
-              <th className="px-4 py-3">Track ID</th>
+              <th className="px-4 py-3">e-NCF</th>
+              <th className="px-4 py-3">DGII</th>
               <th className="px-4 py-3">Intentos</th>
               <th className="px-4 py-3">Último error</th>
               <th className="px-4 py-3" />
@@ -1031,7 +1034,7 @@ function EcfSection({
           </thead>
           <tbody>
             {subs.length === 0 && (
-              <tr><td colSpan={8} className="px-4 py-10 text-center text-slate-400">Sin emisiones e-CF aún</td></tr>
+              <tr><td colSpan={9} className="px-4 py-10 text-center text-slate-400">Sin emisiones e-CF aún</td></tr>
             )}
             {subs.map((s) => (
               <tr key={s.id} className="border-t border-slate-100">
@@ -1039,7 +1042,15 @@ function EcfSection({
                 <td className="px-4 py-3 font-mono text-xs">{s.sale.ncf}</td>
                 <td className="px-4 py-3 text-right tabular-nums">{money(s.sale.total)}</td>
                 <td className="px-4 py-3">{statusBadge(s.status)}</td>
-                <td className="px-4 py-3 font-mono text-xs">{s.trackId ?? '—'}</td>
+                <td className="px-4 py-3 font-mono text-xs">{s.encf ?? '—'}</td>
+                <td className="px-4 py-3">
+                  {s.legalStatus ? (
+                    <span className={`rounded px-2 py-0.5 text-xs font-semibold ${
+                      s.legalStatus === 'ACCEPTED' ? 'bg-emerald-50 text-emerald-700'
+                      : s.legalStatus === 'REJECTED' ? 'bg-red-50 text-red-700'
+                      : 'bg-amber-50 text-amber-700'}`}>{s.legalStatus}</span>
+                  ) : s.status === 'SENT' ? <span className="text-xs text-slate-400">procesando…</span> : '—'}
+                </td>
                 <td className="px-4 py-3 text-center">{s.attempts}</td>
                 <td className="max-w-[200px] truncate px-4 py-3 text-xs text-red-500">{s.lastError}</td>
                 <td className="px-4 py-3">

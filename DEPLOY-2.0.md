@@ -76,6 +76,16 @@ Nota RBAC: los permisos van embebidos en el JWT; **los usuarios deben re-loguear
 tras el deploy para recibir sus permisos (los tokens viejos caen a los permisos del
 rol base automáticamente, así que nada se rompe mientras tanto).
 
+## 5.2 e-CF Pronesoft (implementación real, docs.ecf.pronesoft.com)
+Autenticación **OAuth 2.0 client credentials** (no API key). El `clientId`/`clientSecret`
+se crean en el portal de Pronesoft (sección **Apps → Crear App**), sandbox y producción
+por separado.
+- **Sandbox**: portal https://ecf.sandbox.pronesoft.com · API `https://api.ecf.sandbox.pronesoft.com/api/v1` · ambiente `TesteCF` (va en la URL). RNC de prueba con prefijo `SBX`, sin certificado.
+- **Producción**: API `https://api.ecf.pronesoft.com/api/v1` · ambiente `eCF`. **Requiere subir el certificado digital .p12/.pfx** de la DGII vía `POST /{rnc}/certificates` (multipart `file` + `password`) y administrar las secuencias de e-NCF en el portal. Sin certificado no se puede emitir en producción.
+- Configurar por tenant: SuperAdmin → tenant → Detalles & Config → Fiscal → e-CF (clientId/clientSecret, ambiente), o `PUT /ecf/config`.
+- **Qué llama a Pronesoft**: solo ventas con comprobante fiscal (CONSUMIDOR_FINAL→e-CF 32, CREDITO_FISCAL→31, GUBERNAMENTAL→45, REGISTRO_UNICO_INGRESO→32). Las ventas de **contado sin comprobante** (VENTA_RAPIDA) y SIN_NCF **no** llaman a la API. La venta nunca falla por e-CF (cola + reintentos + consulta de estado DGII).
+- Variable `ECF_SECRET_KEY` cifra los clientSecret (AES-256-GCM).
+
 ## 6. Pendiente / deuda técnica (no bloquea el lanzamiento)
 - `.env.production` sigue en git → sacarlo (`git rm --cached`) y **rotar JWT_SECRET/COOKIE_SECRET/DB/Redis** (rotar JWT invalida sesiones: hacerlo de noche).
 - ~~Migrar `db push` → `prisma migrate`~~ ✅ hecho en 2.1 (baseline `0_init`). Ver §5.1.

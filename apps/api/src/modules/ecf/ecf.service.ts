@@ -6,6 +6,9 @@ import { encryptSecret, decryptSecret } from './ecf-crypto.util';
 import { NcfType, Prisma } from '@prisma/client';
 
 const MAX_ATTEMPTS = 10;
+// Solo estos tipos fiscales generan e-CF y llaman a Pronesoft. Las ventas de
+// contado SIN comprobante fiscal (VENTA_RAPIDA) y SIN_NCF NO llaman a la API:
+// se facturan localmente y nunca se envían a la DGII por e-CF.
 const FISCAL_NCF_TYPES: NcfType[] = [
   NcfType.CONSUMIDOR_FINAL,
   NcfType.CREDITO_FISCAL,
@@ -21,11 +24,12 @@ const INVOICE_TYPE_MAP: Partial<Record<NcfType, string>> = {
   [NcfType.GUBERNAMENTAL]: '45',
 };
 
-// DGII payment forms: 1 efectivo, 2 cheque/transferencia, 3 tarjeta.
+// DGII payment forms: 1 efectivo, 2 cheque/transferencia, 3 tarjeta, 4 venta a crédito.
 const PAYMENT_FORM_MAP: Record<string, string> = {
   CASH: '1',
   TRANSFER: '2',
   CARD: '3',
+  CREDIT: '4',
 };
 
 type SaleWithRelations = Prisma.SaleGetPayload<{
@@ -74,22 +78,28 @@ export class EcfService {
 
     const secretEnc = data.clientSecret ? encryptSecret(data.clientSecret) : undefined;
 
-    const config = await this.prisma.tenantEcfConfig.upsert({
-      where: { tenantId },
-      create: {
-        tenantId,
-        enabled: data.enabled ?? false,
-        environment: data.environment ?? 'sandbox',
-        clientId: data.clientId!,
-        clientSecretEnc: secretEnc!,
-      },
-      update: {
-        enabled: data.enabled,
-        environment: data.environment,
-        clientId: data.clientId,
-        ...(secretEnc ? { clientSecretEnc: secretEnc } : {}),
-      },
-    });
+    // No usamos upsert: Prisma valida la rama `create` aunque se tome `update`,
+    // y clientSecretEnc es obligatorio en create. Al togglear enabled/environment
+    // sin reenviar el secret, upsert fallaría. Create solo cuando no existe.
+    const config = existing
+      ? await this.prisma.tenantEcfConfig.update({
+          where: { tenantId },
+          data: {
+            ...(data.enabled !== undefined ? { enabled: data.enabled } : {}),
+            ...(data.environment ? { environment: data.environment } : {}),
+            ...(data.clientId ? { clientId: data.clientId } : {}),
+            ...(secretEnc ? { clientSecretEnc: secretEnc } : {}),
+          },
+        })
+      : await this.prisma.tenantEcfConfig.create({
+          data: {
+            tenantId,
+            enabled: data.enabled ?? false,
+            environment: data.environment ?? 'sandbox',
+            clientId: data.clientId!,
+            clientSecretEnc: secretEnc!,
+          },
+        });
 
     // Credentials changed → drop any cached token.
     this.pronesoft.invalidateToken(tenantId);
@@ -157,10 +167,77 @@ export class EcfService {
         if (claimed.count === 0) continue;
         await this.processSubmission(id);
       }
+
+      await this.pollPendingStatuses();
     } catch (err) {
       this.logger.error(`e-CF worker tick failed: ${err instanceof Error ? err.message : err}`);
     } finally {
       this.workerRunning = false;
+    }
+  }
+
+  /**
+   * Consulta en la DGII (vía Pronesoft) el estado legal de los e-CF ya enviados
+   * que aún no tienen resultado. Espacia las consultas ~1 min. No afecta la venta.
+   */
+  private async pollPendingStatuses() {
+    const pending = await this.prisma.ecfSubmission.findMany({
+      where: {
+        status: 'SENT',
+        legalStatus: null,
+        documentId: { not: null },
+        nextRetryAt: { lte: new Date() },
+      },
+      orderBy: { updatedAt: 'asc' },
+      take: 10,
+    });
+
+    for (const sub of pending) {
+      try {
+        const config = await this.prisma.tenantEcfConfig.findUnique({ where: { tenantId: sub.tenantId } });
+        if (!config?.enabled) continue;
+
+        const res = await this.pronesoft.status(
+          {
+            tenantId: config.tenantId,
+            environment: config.environment,
+            clientId: config.clientId,
+            clientSecret: decryptSecret(config.clientSecretEnc),
+          },
+          sub.documentId!,
+        );
+
+        const legalStatus = (res.legalStatus as string) ?? null;
+        const trackId = (res.trackId as string) ?? sub.trackId ?? null;
+        const encf = (res.encf as string) ?? sub.encf ?? null;
+
+        await this.prisma.ecfSubmission.update({
+          where: { id: sub.id },
+          data: {
+            legalStatus,
+            trackId,
+            encf,
+            response: res as Prisma.InputJsonValue,
+            // vuelve a consultar en 1 min si la DGII aún no responde
+            nextRetryAt: new Date(Date.now() + 60_000),
+          },
+        });
+
+        if (legalStatus) {
+          await this.prisma.sale.update({
+            where: { id: sub.saleId },
+            data: { ecfStatus: legalStatus, ecfTrackId: trackId ?? encf },
+          });
+          this.logger.log(`e-CF ${sub.saleId}: DGII ${legalStatus} (trackId=${trackId})`);
+        }
+      } catch (err) {
+        // Consultar estado nunca debe tumbar el worker; reintenta luego.
+        await this.prisma.ecfSubmission.update({
+          where: { id: sub.id },
+          data: { nextRetryAt: new Date(Date.now() + 120_000) },
+        }).catch(() => undefined);
+        this.logger.warn(`e-CF status poll falló (${sub.saleId}): ${err instanceof Error ? err.message : err}`);
+      }
     }
   }
 
@@ -190,7 +267,14 @@ export class EcfService {
       });
       if (!config?.enabled) throw new Error('e-CF deshabilitado para el tenant');
 
-      const payload = this.buildPayload(sale, config.environment);
+      const payload = this.buildPayload(sale);
+
+      // Guardar el payload antes de enviar: queda inspeccionable aunque el envío
+      // falle (útil para depurar credenciales o validaciones de Pronesoft).
+      await this.prisma.ecfSubmission.update({
+        where: { id: submissionId },
+        data: { payload: payload as Prisma.InputJsonValue },
+      });
 
       const response = await this.pronesoft.submit(
         {
@@ -202,23 +286,32 @@ export class EcfService {
         payload,
       );
 
-      const trackId =
-        (response.trackId as string) ??
-        (response.track_id as string) ??
-        (response.id as string) ??
-        null;
+      // Respuesta 201: { id (uuid Pronesoft), status:"REGISTERED", encf, trackId? ... }.
+      // El trackId de la DGII llega después al consultar estado.
+      const documentId = (response.id as string) ?? null;
+      const encf = (response.encf as string) ?? null;
+      const trackId = (response.trackId as string) ?? null;
 
       await this.prisma.$transaction([
         this.prisma.ecfSubmission.update({
           where: { id: submissionId },
-          data: { status: 'SENT', trackId, lastError: null, payload: payload as Prisma.InputJsonValue },
+          data: {
+            status: 'SENT',
+            documentId,
+            encf,
+            trackId,
+            lastError: null,
+            payload: payload as Prisma.InputJsonValue,
+            response: response as Prisma.InputJsonValue,
+            nextRetryAt: new Date(),
+          },
         }),
         this.prisma.sale.update({
           where: { id: submission.saleId },
-          data: { ecfStatus: 'SENT', ecfTrackId: trackId },
+          data: { ecfStatus: 'SENT', ecfTrackId: encf ?? trackId },
         }),
       ]);
-      this.logger.log(`e-CF SENT for sale ${submission.saleId} (trackId=${trackId})`);
+      this.logger.log(`e-CF enviado: sale ${submission.saleId} → Pronesoft id=${documentId} encf=${encf}`);
     } catch (err) {
       const attempts = submission.attempts + 1;
       const message = err instanceof Error ? err.message : String(err);
@@ -245,47 +338,89 @@ export class EcfService {
 
   // ───────────────────────── payload mapping ─────────────────────────
 
-  private buildPayload(sale: SaleWithRelations, environment: string): Record<string, unknown> {
+  /**
+   * Construye el payload del e-CF según https://docs.ecf.pronesoft.com/ecf/send.
+   *
+   * IMPORTANTE: el POS guarda precios CON ITBIS incluido, pero el e-CF exige la
+   * base gravable (sin impuesto) por línea + el ITBIS aparte. Aquí convertimos
+   * cada línea de precio tax-inclusive a base + impuesto, y los totales se suman
+   * de las líneas para que siempre reconcilien.
+   *
+   * No se envía el emisor en el body: Pronesoft lo toma de la empresa autenticada.
+   * El e-NCF (invoiceNumber) se omite: en sandbox lo asigna Pronesoft; en
+   * producción las secuencias se administran en su portal.
+   */
+  private buildPayload(sale: SaleWithRelations): Record<string, unknown> {
     const invoiceType = INVOICE_TYPE_MAP[sale.ncfType] ?? '32';
 
-    const taxable = sale.applyItbis
-      ? parseFloat((sale.total - sale.itbis).toFixed(2))
-      : 0;
-    const exempt = sale.applyItbis ? 0 : sale.total;
+    const round = (n: number) => parseFloat(n.toFixed(2));
 
-    return {
-      // Sandbox requires environment "TesteCF" in the body per Pronesoft docs.
-      ...(environment !== 'prod' ? { environment: 'TesteCF' } : {}),
-      invoiceType,
-      issueDate: sale.createdAt.toISOString().slice(0, 10),
-      paymentType: 1, // contado
-      issuerRNC: sale.tenant.rnc,
-      issuerBusinessName: sale.tenant.commercialName || sale.tenant.name,
-      issuerAddress: sale.tenant.address || undefined,
-      buyer: sale.clientRnc
-        ? { taxId: sale.clientRnc, name: sale.clientName || undefined }
-        : undefined,
-      items: sale.items.map((item) => ({
-        name: item.product.name,
+    let taxableTotal = 0;
+    let itbisTotal = 0;
+    const items = sale.items.map((item) => {
+      const ratePct = sale.applyItbis ? item.product.taxPercentage ?? 0 : 0;
+      const rate = ratePct / 100;
+      const lineGross = item.price * item.quantity; // con ITBIS
+      const lineTaxable = rate > 0 ? lineGross / (1 + rate) : lineGross;
+      const lineItbis = lineGross - lineTaxable;
+      const unitTaxable = rate > 0 ? item.price / (1 + rate) : item.price;
+
+      taxableTotal += lineTaxable;
+      itbisTotal += lineItbis;
+
+      // billingIndicator DGII: 1=18%, 2=16%, 3=0%, 4=Exento.
+      const billingIndicator = ratePct === 18 ? '1' : ratePct === 16 ? '2' : rate > 0 ? '3' : '4';
+
+      return {
+        lineNumber: sale.items.indexOf(item) + 1,
+        name: item.product.name.slice(0, 80),
+        type: item.product.type === 'SERVICE' ? '2' : '1',
+        billingIndicator,
         quantity: item.quantity,
-        unitPrice: item.price,
-        unitOfMeasure: item.product.uom || 'Unidad',
-      })),
+        unitPrice: round(unitTaxable),
+        amount: round(lineTaxable),
+      };
+    });
+
+    taxableTotal = round(taxableTotal);
+    itbisTotal = round(itbisTotal);
+    const totalAmount = round(taxableTotal + itbisTotal);
+
+    // Reconciliación informativa: si hubo descuento a nivel de venta, el total
+    // de líneas puede diferir del total cobrado. Se registra para auditoría.
+    if (Math.abs(totalAmount - sale.total) > 0.05) {
+      this.logger.warn(
+        `e-CF sale ${sale.id}: total de líneas ${totalAmount} ≠ total de la venta ${sale.total} (¿descuento?)`,
+      );
+    }
+
+    // buyer: requerido para crédito fiscal (31) y gubernamental (45); opcional en
+    // consumo (32). Se incluye cuando hay RNC/nombre.
+    const buyer =
+      sale.clientRnc || sale.clientName
+        ? {
+            ...(sale.clientRnc ? { taxId: sale.clientRnc } : {}),
+            name: sale.clientName || 'CONSUMIDOR FINAL',
+          }
+        : undefined;
+
+    const payload: Record<string, unknown> = {
+      version: '1.0',
+      invoiceType,
+      issueDate: sale.createdAt.toISOString(),
+      items,
       totals: {
-        taxableAmount: taxable,
-        exemptAmount: parseFloat(exempt.toFixed(2)),
-        totalITBIS: sale.itbis,
-        totalAmount: sale.total,
+        taxableAmount: taxableTotal,
+        itbisRate1: 0.18,
+        totalITBIS: itbisTotal,
+        totalAmount,
       },
       paymentForms: [
-        {
-          method: PAYMENT_FORM_MAP[sale.paymentMethod] ?? '1',
-          amount: sale.total,
-        },
+        { method: PAYMENT_FORM_MAP[sale.paymentMethod] ?? '1', amount: totalAmount },
       ],
-      // Internal reference for reconciliation on webhooks/queries.
-      additional_info: { internalInvoice: sale.invoiceNumber, internalNcf: sale.ncf },
     };
+    if (buyer) payload.buyer = buyer;
+    return payload;
   }
 
   // ───────────────────────── queries / retry ─────────────────────────

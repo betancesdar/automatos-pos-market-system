@@ -385,12 +385,18 @@ model EcfSubmission {
   tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   saleId      String   @unique
   sale        Sale     @relation(fields: [saleId], references: [id])
-  status      String   @default("QUEUED") // QUEUED | PROCESSING | SENT | FAILED
+  // QUEUED → PROCESSING → SENT (registrado en Pronesoft) → legalStatus (DGII) | FAILED
+  status      String   @default("QUEUED")
   attempts    Int      @default(0)
   nextRetryAt DateTime @default(now())
-  trackId     String?
+  // id del documento en Pronesoft (para consultar estado) y e-NCF asignado (E31..)
+  documentId  String?
+  encf        String?
+  trackId     String?  // trackId de la DGII (llega al consultar estado)
+  legalStatus String?  // ACCEPTED | ACCEPTED_WITH_OBSERVATIONS | REJECTED | ERROR
   lastError   String?
   payload     Json?
+  response    Json?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
