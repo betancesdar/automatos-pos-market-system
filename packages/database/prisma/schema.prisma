@@ -26,6 +26,8 @@ model Tenant {
   invoiceCounter Int      @default(0)
   // Atomic per-tenant quote (cotización) counter
   quoteCounter   Int      @default(0)
+  // Atomic per-tenant promissory note (pagaré) counter
+  promissoryCounter Int   @default(0)
   // Thermal receipt configuration
   receiptLogoUrl String?
   commercialName String?
@@ -200,6 +202,7 @@ model Sale {
   items         SaleItem[]
   order         Order?
   ecfSubmission EcfSubmission?
+  creditSale    CreditSale?
 
   @@unique([invoiceNumber, tenantId])
   @@unique([tenantId, ncf])
@@ -279,6 +282,7 @@ enum PaymentMethod {
   CASH
   CARD
   TRANSFER
+  CREDIT
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -499,6 +503,7 @@ model Customer {
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
   quotes      Quote[]
+  creditSales CreditSale[]
 
   @@index([tenantId, name])
   @@index([tenantId, docNumber])
@@ -547,4 +552,100 @@ model QuoteItem {
   quantity  Float
   unitPrice Decimal @db.Decimal(14, 2)
   isLoose   Boolean @default(false)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Crédito / Cuentas por cobrar (Fase 4): factura a crédito con cuotas, mora
+// configurable, abonos y pagaré notarial. Dinero en Decimal.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum CreditFrequency {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+}
+
+enum CreditStatus {
+  OPEN
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum InstallmentStatus {
+  PENDING
+  PARTIAL
+  PAID
+  OVERDUE
+}
+
+model CreditSale {
+  id               String          @id @default(uuid())
+  tenantId         String
+  saleId           String          @unique
+  sale             Sale            @relation(fields: [saleId], references: [id])
+  customerId       String
+  customer         Customer        @relation(fields: [customerId], references: [id])
+  principal        Decimal         @db.Decimal(14, 2) // total de la venta
+  downPayment      Decimal         @default(0) @db.Decimal(14, 2) // inicial
+  financedAmount   Decimal         @db.Decimal(14, 2) // principal - inicial
+  installmentsCount Int
+  frequency        CreditFrequency @default(MONTHLY)
+  firstDueDate     DateTime
+  lateFeePercent   Decimal         @default(0) @db.Decimal(5, 2) // recargo por mora (%)
+  balance          Decimal         @db.Decimal(14, 2) // saldo pendiente
+  status           CreditStatus    @default(OPEN)
+  createdById      String
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  installments     Installment[]
+  payments         CreditPayment[]
+  promissoryNote   PromissoryNote?
+
+  @@index([tenantId, status])
+  @@index([customerId])
+}
+
+model Installment {
+  id           String            @id @default(uuid())
+  creditSaleId String
+  creditSale   CreditSale        @relation(fields: [creditSaleId], references: [id], onDelete: Cascade)
+  number       Int
+  dueDate      DateTime
+  amount       Decimal           @db.Decimal(14, 2)
+  paidAmount   Decimal           @default(0) @db.Decimal(14, 2)
+  status       InstallmentStatus @default(PENDING)
+
+  @@index([creditSaleId])
+}
+
+model CreditPayment {
+  id           String        @id @default(uuid())
+  tenantId     String
+  creditSaleId String
+  creditSale   CreditSale    @relation(fields: [creditSaleId], references: [id], onDelete: Cascade)
+  amount       Decimal       @db.Decimal(14, 2)
+  method       PaymentMethod @default(CASH)
+  isDownPayment Boolean      @default(false)
+  receivedById String
+  cashSessionId String?
+  note         String?
+  createdAt    DateTime      @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([creditSaleId])
+}
+
+model PromissoryNote {
+  id             String     @id @default(uuid())
+  creditSaleId   String     @unique
+  creditSale     CreditSale @relation(fields: [creditSaleId], references: [id], onDelete: Cascade)
+  number         String // ej. PG-2026-00001
+  debtorSnapshot Json // nombre, documento, dirección, teléfono al momento
+  amount         Decimal    @db.Decimal(14, 2)
+  amountInWords  String
+  legalText      String // texto del pagaré generado
+  signedAt       DateTime?
+  notaryInfo     String?
+  createdAt      DateTime   @default(now())
 }

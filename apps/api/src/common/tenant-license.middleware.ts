@@ -27,6 +27,7 @@ const LICENSE_PROTECTED_PREFIXES = [
   '/roles',
   '/customers',
   '/quotes',
+  '/credit',
 ];
 
 @Injectable()

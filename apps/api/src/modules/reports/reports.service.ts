@@ -34,6 +34,7 @@ export class ReportsService {
       CASH: { method: PaymentMethod.CASH, count: 0, total: 0 },
       CARD: { method: PaymentMethod.CARD, count: 0, total: 0 },
       TRANSFER: { method: PaymentMethod.TRANSFER, count: 0, total: 0 },
+      CREDIT: { method: PaymentMethod.CREDIT, count: 0, total: 0 },
     };
 
     for (const sale of sales) {

@@ -20,6 +20,7 @@ import { AccountingModule } from './modules/accounting/accounting.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { CustomersModule } from './modules/customers/customers.module';
 import { QuotesModule } from './modules/quotes/quotes.module';
+import { CreditModule } from './modules/credit/credit.module';
 import { AuditModule } from './common/audit.module';
 import { TenantLicenseMiddleware } from './common/tenant-license.middleware';
 import { JwtAuthGuard, PermissionsGuard } from './common/auth.guard';
@@ -44,6 +45,7 @@ import { JwtAuthGuard, PermissionsGuard } from './common/auth.guard';
     RolesModule,
     CustomersModule,
     QuotesModule,
+    CreditModule,
     AuditModule,
   ],
   controllers: [AppController],

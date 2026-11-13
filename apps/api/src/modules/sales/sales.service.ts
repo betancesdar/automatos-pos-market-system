@@ -228,8 +228,14 @@ export class SalesService {
         throw new BadRequestException('Cash received is less than total');
       }
 
-      const cashReceived = paymentMethod === PaymentMethod.CASH ? data.cashReceived : total;
-      const changeDue = parseFloat((cashReceived - total).toFixed(2));
+      // CREDIT: la venta no recibe efectivo por el flujo normal; el inicial y los
+      // abonos se registran aparte como CreditPayment + inflow de caja (módulo credit).
+      let cashReceived: number;
+      if (paymentMethod === PaymentMethod.CASH) cashReceived = data.cashReceived;
+      else if (paymentMethod === PaymentMethod.CREDIT) cashReceived = 0;
+      else cashReceived = total;
+      const changeDue =
+        paymentMethod === PaymentMethod.CREDIT ? 0 : parseFloat((cashReceived - total).toFixed(2));
 
       if (data.ncfType === NcfType.CREDITO_FISCAL) {
         const rnc = data.clientRnc?.replace(/\D/g, '') ?? '';

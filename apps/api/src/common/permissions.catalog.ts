@@ -53,6 +53,11 @@ export const PERMISSIONS: PermissionDef[] = [
   { code: 'quotes.view', label: 'Ver cotizaciones', group: 'Clientes' },
   { code: 'quotes.manage', label: 'Crear/editar cotizaciones', group: 'Clientes' },
   { code: 'quotes.convert', label: 'Convertir cotización en venta/pedido', group: 'Clientes' },
+  // Crédito / cuentas por cobrar
+  { code: 'credit.view', label: 'Ver cuentas por cobrar', group: 'Crédito' },
+  { code: 'credit.sell', label: 'Vender a crédito', group: 'Crédito' },
+  { code: 'credit.payment', label: 'Registrar abonos', group: 'Crédito' },
+  { code: 'credit.manage', label: 'Cancelar/ajustar crédito', group: 'Crédito' },
   // Administración del comercio
   { code: 'tenant.manage', label: 'Editar datos del comercio', group: 'Administración' },
   { code: 'users.manage', label: 'Gestionar empleados', group: 'Administración' },
@@ -86,6 +91,9 @@ export const ROLE_DEFAULTS: Record<string, string[]> = {
     'quotes.view',
     'quotes.manage',
     'quotes.convert',
+    'credit.view',
+    'credit.sell',
+    'credit.payment',
   ],
   BILLER: [
     'orders.create',
@@ -111,6 +119,7 @@ export const ROLE_DEFAULTS: Record<string, string[]> = {
     'ecf.view',
     'customers.view',
     'quotes.view',
+    'credit.view',
   ],
 };
 
