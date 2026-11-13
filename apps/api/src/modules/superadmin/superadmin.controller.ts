@@ -15,7 +15,7 @@ import type { Request } from 'express';
 import { SuperadminService } from './superadmin.service';
 import { EcfService } from '../ecf/ecf.service';
 import { AuditService } from '../../common/audit.module';
-import { JwtAuthGuard, RolesGuard, Roles } from '../../common/auth.guard';
+import { JwtAuthGuard, RequirePermissions } from '../../common/auth.guard';
 import type { TokenPayload } from '../../common/jwt.util';
 import { NcfType } from '@prisma/client';
 
@@ -71,8 +71,8 @@ class UpsertEcfConfigDto {
 }
 
 @Controller('superadmin')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('SUPER_ADMIN')
+@UseGuards(JwtAuthGuard)
+@RequirePermissions('platform.admin')
 export class SuperadminController {
   constructor(
     private readonly superadminService: SuperadminService,

@@ -47,6 +47,7 @@ model Tenant {
   purchases         Purchase[]
   reconciliations   CashReconciliation[]
   accountingPeriods AccountingPeriod[]
+  customRoles       CustomRole[]
 }
 
 model User {
@@ -55,7 +56,12 @@ model User {
   username  String   @unique
   email     String?  @unique
   password  String
+  // Base/system role — kept as the RBAC baseline. Effective permissions =
+  // ROLE_DEFAULTS[role] ∪ customRole.permissionCodes (see permissions.catalog.ts).
   role      Role     @default(CASHIER)
+  // Optional per-tenant custom role that adds/overrides granular permissions.
+  customRoleId String?
+  customRole   CustomRole? @relation(fields: [customRoleId], references: [id])
   tenantId  String?
   tenant    Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
@@ -72,6 +78,25 @@ enum Role {
   CASHIER
   BILLER
   ACCOUNTANT
+}
+
+// Rol personalizado por comercio (RBAC). El catálogo de permisos vive en código
+// (apps/api/src/common/permissions.catalog.ts) como fuente única de verdad; aquí
+// solo se guardan los códigos seleccionados para este rol.
+model CustomRole {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name            String
+  description     String?
+  permissionCodes String[] // referencia a Permission.code del catálogo en código
+  isSystem        Boolean  @default(false) // roles sembrados equivalentes al enum base
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  users           User[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
 }
 
 model Category {

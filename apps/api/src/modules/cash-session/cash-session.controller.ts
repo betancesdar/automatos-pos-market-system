@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Body, Param, Query, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { CashSessionService } from './cash-session.service';
-import { JwtAuthGuard, Roles } from '../../common/auth.guard';
+import { JwtAuthGuard, RequirePermissions } from '../../common/auth.guard';
 import { TenantId } from '../../common/tenant.decorator';
 import type { TokenPayload } from '../../common/jwt.util';
 
@@ -21,7 +21,7 @@ class CashMovementDto {
 }
 
 @UseGuards(JwtAuthGuard)
-@Roles('CASHIER', 'ADMIN', 'ACCOUNTANT', 'SUPER_ADMIN')
+@RequirePermissions('cash.view')
 @Controller('cash-sessions')
 export class CashSessionController {
   constructor(private readonly cashSessionService: CashSessionService) {}
@@ -45,7 +45,7 @@ export class CashSessionController {
     return this.cashSessionService.getShiftSummary(tenantId, from, to);
   }
 
-  @Roles('CASHIER', 'ADMIN', 'SUPER_ADMIN')
+  @RequirePermissions('cash.operate')
   @Post('movements')
   addMovement(@TenantId() tenantId: string, @Body() body: CashMovementDto) {
     return this.cashSessionService.addMovement(tenantId, body);
@@ -56,7 +56,7 @@ export class CashSessionController {
     return this.cashSessionService.list(tenantId, limit ? parseInt(limit, 10) : undefined);
   }
 
-  @Roles('CASHIER', 'ADMIN', 'SUPER_ADMIN')
+  @RequirePermissions('cash.operate')
   @Post('open')
   open(
     @TenantId() tenantId: string,
@@ -66,7 +66,7 @@ export class CashSessionController {
     return this.cashSessionService.open(tenantId, req.user.sub, body.openingBalance);
   }
 
-  @Roles('CASHIER', 'ADMIN', 'SUPER_ADMIN')
+  @RequirePermissions('cash.operate')
   @Post(':id/close')
   close(
     @TenantId() tenantId: string,

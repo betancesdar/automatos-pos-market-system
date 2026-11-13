@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Body, Query } from '@nestjs/common';
 import { FinanceService } from './finance.service';
-import { Roles } from '../../common/auth.guard';
+import { RequirePermissions } from '../../common/auth.guard';
 import { TenantId } from '../../common/tenant.decorator';
 
 class CloseCashDrawerDto {
@@ -8,7 +8,7 @@ class CloseCashDrawerDto {
   notes?: string;
 }
 
-@Roles('ADMIN', 'ACCOUNTANT', 'SUPER_ADMIN')
+@RequirePermissions('finance.view')
 @Controller('finance')
 export class FinanceController {
   constructor(private readonly financeService: FinanceService) {}
@@ -55,7 +55,7 @@ export class FinanceController {
     return this.financeService.getNcfLog(tenantId, from, to);
   }
 
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @RequirePermissions('finance.manage')
   @Post('cash-drawer/close')
   async closeCashDrawer(
     @TenantId() tenantId: string,

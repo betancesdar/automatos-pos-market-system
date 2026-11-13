@@ -8,6 +8,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { NcfType } from '@prisma/client';
 import { hashPassword, validateRnc } from '../../common/password.util';
 import { signToken } from '../../common/jwt.util';
+import { effectivePermissions } from '../../common/permissions.catalog';
 
 function defaultExpiry(): Date {
   const d = new Date();
@@ -170,6 +171,7 @@ export class SuperadminService {
       email: adminUser.email,
       role: 'ADMIN',
       tenantId: tenant.id,
+      permissions: effectivePermissions('ADMIN'),
     });
 
     return {

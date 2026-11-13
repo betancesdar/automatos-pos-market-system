@@ -17,9 +17,10 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { EcfModule } from './modules/ecf/ecf.module';
 import { AccountingModule } from './modules/accounting/accounting.module';
+import { RolesModule } from './modules/roles/roles.module';
 import { AuditModule } from './common/audit.module';
 import { TenantLicenseMiddleware } from './common/tenant-license.middleware';
-import { JwtAuthGuard, RolesGuard } from './common/auth.guard';
+import { JwtAuthGuard, PermissionsGuard } from './common/auth.guard';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { JwtAuthGuard, RolesGuard } from './common/auth.guard';
     OrdersModule,
     EcfModule,
     AccountingModule,
+    RolesModule,
     AuditModule,
   ],
   controllers: [AppController],
@@ -45,7 +47,7 @@ import { JwtAuthGuard, RolesGuard } from './common/auth.guard';
     AppService,
     TenantLicenseMiddleware,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
-    { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
 })
 export class AppModule implements NestModule {

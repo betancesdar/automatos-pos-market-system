@@ -13,7 +13,7 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { AccountingService } from './accounting.service';
-import { Roles } from '../../common/auth.guard';
+import { RequirePermissions } from '../../common/auth.guard';
 import { TenantId } from '../../common/tenant.decorator';
 import type { TokenPayload } from '../../common/jwt.util';
 import { PaymentMethod } from '@prisma/client';
@@ -104,7 +104,7 @@ function parsePeriod(year: string, month: string): { y: number; m: number } {
   return { y, m };
 }
 
-@Roles('ADMIN', 'ACCOUNTANT', 'SUPER_ADMIN')
+@RequirePermissions('accounting.view')
 @Controller('accounting')
 export class AccountingController {
   constructor(private readonly accountingService: AccountingService) {}
@@ -126,6 +126,7 @@ export class AccountingController {
     return this.accountingService.listReconciliations(tenantId, { from, to, status });
   }
 
+  @RequirePermissions('accounting.manage')
   @Post('reconciliations/:id/review')
   reviewReconciliation(
     @TenantId() tenantId: string,
@@ -149,6 +150,7 @@ export class AccountingController {
     });
   }
 
+  @RequirePermissions('accounting.manage')
   @Post('purchases')
   createPurchase(
     @TenantId() tenantId: string,
@@ -158,6 +160,7 @@ export class AccountingController {
     return this.accountingService.createPurchase(tenantId, req.user.sub, body);
   }
 
+  @RequirePermissions('accounting.manage')
   @Patch('purchases/:id')
   updatePurchase(
     @TenantId() tenantId: string,
@@ -167,6 +170,7 @@ export class AccountingController {
     return this.accountingService.updatePurchase(tenantId, id, body);
   }
 
+  @RequirePermissions('accounting.manage')
   @Delete('purchases/:id')
   deletePurchase(@TenantId() tenantId: string, @Param('id') id: string) {
     return this.accountingService.deletePurchase(tenantId, id);
@@ -219,6 +223,7 @@ export class AccountingController {
     return this.accountingService.listPeriods(tenantId);
   }
 
+  @RequirePermissions('accounting.manage')
   @Post('periods/:year/:month/close')
   closePeriod(
     @TenantId() tenantId: string,
@@ -229,6 +234,7 @@ export class AccountingController {
     return this.accountingService.closePeriod(tenantId, year, month, actorFrom(req));
   }
 
+  @RequirePermissions('accounting.manage')
   @Post('periods/:year/:month/approve')
   approvePeriod(
     @TenantId() tenantId: string,
@@ -239,7 +245,7 @@ export class AccountingController {
     return this.accountingService.approvePeriod(tenantId, year, month, actorFrom(req));
   }
 
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @RequirePermissions('accounting.period.reopen')
   @Post('periods/:year/:month/reopen')
   reopenPeriod(
     @TenantId() tenantId: string,

@@ -72,12 +72,23 @@ export class OrdersService {
   }
 
   /** Cashier queue — lazily expires yesterday's pending orders first. */
-  async list(tenantId: string, status?: string) {
+  async list(tenantId: string, status?: string, search?: string) {
     await this.expireStaleOrders(tenantId);
 
     const where: Prisma.OrderWhereInput = { tenantId };
     if (status && status !== 'ALL') {
       where.status = status as OrderStatus;
+    }
+
+    // Caja busca por # de pedido o por nombre del cliente.
+    const term = search?.trim();
+    if (term) {
+      const digits = term.replace(/\D/g, '');
+      const or: Prisma.OrderWhereInput[] = [
+        { clientName: { contains: term, mode: 'insensitive' } },
+      ];
+      if (digits) or.push({ dailyCode: parseInt(digits, 10) });
+      where.OR = or;
     }
 
     return this.prisma.order.findMany({

@@ -16,7 +16,7 @@ import {
 } from 'class-validator';
 import { SalesService } from './sales.service';
 import { NcfType, PaymentMethod } from '@prisma/client';
-import { JwtAuthGuard, Roles } from '../../common/auth.guard';
+import { JwtAuthGuard, RequirePermissions } from '../../common/auth.guard';
 import { TenantId } from '../../common/tenant.decorator';
 import type { TokenPayload } from '../../common/jwt.util';
 
@@ -101,7 +101,7 @@ export class SalesController {
   constructor(private readonly salesService: SalesService) {}
 
   @UseGuards(JwtAuthGuard)
-  @Roles('CASHIER', 'ADMIN', 'SUPER_ADMIN')
+  @RequirePermissions('pos.sell')
   @Post('checkout')
   checkout(
     @TenantId() tenantId: string,
@@ -117,7 +117,7 @@ export class SalesController {
    * reported as "duplicate" and never reprocessed/double-deducted.
    */
   @UseGuards(JwtAuthGuard)
-  @Roles('CASHIER', 'ADMIN', 'SUPER_ADMIN')
+  @RequirePermissions('pos.sell')
   @Post('sync')
   sync(
     @TenantId() tenantId: string,
@@ -127,6 +127,7 @@ export class SalesController {
     return this.salesService.syncOfflineSales(tenantId, body.sales ?? [], req.user.sub);
   }
 
+  @RequirePermissions('sales.view')
   @Get()
   list(
     @TenantId() tenantId: string,
@@ -145,13 +146,14 @@ export class SalesController {
     });
   }
 
+  @RequirePermissions('sales.view')
   @Get(':id')
   get(@TenantId() tenantId: string, @Param('id') id: string) {
     return this.salesService.getSale(tenantId, id);
   }
 
   @UseGuards(JwtAuthGuard)
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @RequirePermissions('sales.void')
   @Post(':id/void')
   void(
     @TenantId() tenantId: string,

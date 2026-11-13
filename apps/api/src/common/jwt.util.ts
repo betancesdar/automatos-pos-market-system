@@ -9,6 +9,9 @@ export interface TokenPayload extends JwtPayload {
   username: string;
   role: string;
   tenantId?: string | null;
+  // Permisos efectivos (RBAC) sembrados al emitir el token. Un token sin este
+  // campo (emitido antes de 2.1) se resuelve por rol base en el guard.
+  permissions?: string[];
 }
 
 function getSecret(): string {

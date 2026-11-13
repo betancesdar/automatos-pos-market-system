@@ -6,19 +6,21 @@ import { AdminShell } from '../../../components/admin/AdminShell';
 import { TenantSettingsPanel } from '../../../components/admin/TenantSettingsPanel';
 import { ReceiptSettingsPanel } from '../../../components/admin/ReceiptSettingsPanel';
 import { EmployeesPanel } from '../../../components/admin/EmployeesPanel';
+import { RolesPanel } from '../../../components/admin/RolesPanel';
 
-type SettingsTab = 'general' | 'receipt' | 'users';
-
-const TABS: { id: SettingsTab; label: string; icon: string }[] = [
-  { id: 'general', label: 'General', icon: '🏪' },
-  { id: 'receipt', label: 'Recibos / Impresora', icon: '🧾' },
-  { id: 'users', label: 'Usuarios', icon: '👥' },
-];
+type SettingsTab = 'general' | 'receipt' | 'users' | 'roles';
 
 export default function SettingsPage() {
-  const { user } = useAuth();
+  const { user, can } = useAuth();
   const tenantId = user?.tenantId ?? '';
   const [tab, setTab] = useState<SettingsTab>('general');
+
+  const TABS: { id: SettingsTab; label: string; icon: string }[] = [
+    { id: 'general', label: 'General', icon: '🏪' },
+    { id: 'receipt', label: 'Recibos / Impresora', icon: '🧾' },
+    { id: 'users', label: 'Usuarios', icon: '👥' },
+    ...(can('roles.manage') ? [{ id: 'roles' as SettingsTab, label: 'Roles y permisos', icon: '🔐' }] : []),
+  ];
 
   return (
     <AdminShell title="Configuración" subtitle="Datos del negocio, recibos térmicos y usuarios">
@@ -54,6 +56,13 @@ export default function SettingsPage() {
         <section>
           <h3 className="mb-4 text-lg font-bold text-slate-900">Gestión de Usuarios</h3>
           <EmployeesPanel tenantId={tenantId} />
+        </section>
+      )}
+
+      {tab === 'roles' && (
+        <section>
+          <h3 className="mb-4 text-lg font-bold text-slate-900">Roles y Permisos</h3>
+          <RolesPanel tenantId={tenantId} />
         </section>
       )}
     </AdminShell>

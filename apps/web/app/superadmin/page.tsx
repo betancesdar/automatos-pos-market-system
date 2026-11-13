@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../lib/auth-context';
 import { superadminFetch } from '../../lib/api';
@@ -52,12 +53,15 @@ export default function SuperadminPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [actionId, setActionId] = useState<string | null>(null);
-  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [renewOption, setRenewOption] = useState<RenewOption>('MONTH_1');
   const [customExpiryDate, setCustomExpiryDate] = useState('');
   const [detailTenant, setDetailTenant] = useState<TenantRow | null>(null);
   const [showPlans, setShowPlans] = useState(false);
   const [showAudit, setShowAudit] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'SUSPENDED' | 'EXPIRED'>('ALL');
+  // Posición del menú de acciones (portal) — evita el recorte del overflow de la tabla.
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -77,14 +81,32 @@ export default function SuperadminPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Close dropdown when clicking outside
+  // Cerrar el menú de acciones al hacer clic fuera, hacer scroll o redimensionar.
   useEffect(() => {
-    const handleClick = () => setOpenDropdown(null);
-    if (openDropdown) {
-      document.addEventListener('click', handleClick);
-      return () => document.removeEventListener('click', handleClick);
-    }
-  }, [openDropdown]);
+    if (!menu) return;
+    const close = () => setMenu(null);
+    document.addEventListener('click', close);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      document.removeEventListener('click', close);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [menu]);
+
+  const visibleTenants = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return tenants.filter((t) => {
+      if (q && !t.name.toLowerCase().includes(q) && !t.rnc.toLowerCase().includes(q)) return false;
+      if (statusFilter === 'ALL') return true;
+      const expired = new Date(t.expiresAt) < new Date();
+      if (statusFilter === 'SUSPENDED') return !t.isActive;
+      if (statusFilter === 'EXPIRED') return t.isActive && expired;
+      if (statusFilter === 'ACTIVE') return t.isActive && !expired;
+      return true;
+    });
+  }, [tenants, searchQuery, statusFilter]);
 
   const openModal = (type: ModalType, tenant?: TenantRow) => {
     setModalType(type);
@@ -103,7 +125,7 @@ export default function SuperadminPage() {
     } else if (type === 'create') {
       setForm(emptyForm);
     }
-    setOpenDropdown(null);
+    setMenu(null);
   };
 
   const closeModal = () => {
@@ -271,9 +293,9 @@ export default function SuperadminPage() {
         </div>
 
         {/* Actions bar */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-bold">Todos los Comercios</h2>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button onClick={() => setShowAudit(true)} className="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">
               📜 Auditoría
             </button>
@@ -287,6 +309,35 @@ export default function SuperadminPage() {
               + Registrar Minimarket
             </button>
           </div>
+        </div>
+
+        {/* Buscador + filtro de estado */}
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Buscar por nombre o RNC…"
+            className="min-w-[220px] flex-1 rounded-lg border border-slate-700 bg-slate-900 px-4 py-2 text-sm outline-none focus:border-violet-500"
+          />
+          <div className="flex gap-1 rounded-lg border border-slate-800 bg-slate-900 p-1">
+            {([
+              ['ALL', 'Todos'],
+              ['ACTIVE', 'Activos'],
+              ['SUSPENDED', 'Suspendidos'],
+              ['EXPIRED', 'Por vencer'],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setStatusFilter(key)}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  statusFilter === key ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <span className="text-xs text-slate-500">{visibleTenants.length} de {tenants.length}</span>
         </div>
 
         {/* Tenants table */}
@@ -303,7 +354,7 @@ export default function SuperadminPage() {
               </tr>
             </thead>
             <tbody>
-              {tenants.map((t) => {
+              {visibleTenants.map((t) => {
                 const status = getStatus(t);
                 return (
                   <tr key={t.id} className="border-b border-slate-800/50 hover:bg-slate-800/30">
@@ -323,71 +374,69 @@ export default function SuperadminPage() {
                         {status.label}
                       </span>
                     </td>
-                    <td className="relative px-6 py-4 text-right">
-                      <div className="relative inline-block">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setOpenDropdown(openDropdown === t.id ? null : t.id);
-                          }}
-                          className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-bold text-slate-300 hover:bg-slate-700"
-                        >
-                          Acciones ▾
-                        </button>
-                        {openDropdown === t.id && (
-                          <div className="absolute right-0 z-[100] mt-1 w-56 rounded-lg border border-slate-700 bg-slate-900 shadow-2xl">
-                            <button
-                              onClick={() => { setDetailTenant(t); setOpenDropdown(null); }}
-                              className="w-full px-4 py-2.5 text-left text-sm font-medium text-cyan-400 hover:bg-slate-800"
-                            >
-                              📋 Detalles & Config
-                            </button>
-                            <button
-                              onClick={() => handleImpersonate(t)}
-                              disabled={actionId === t.id}
-                              className="w-full px-4 py-2.5 text-left text-sm font-medium text-violet-400 hover:bg-slate-800 disabled:opacity-50"
-                            >
-                              🔐 Ingresar como Comercio
-                            </button>
-                            <button
-                              onClick={() => openModal('renew', t)}
-                              className="w-full px-4 py-2.5 text-left text-sm font-medium text-emerald-400 hover:bg-slate-800"
-                            >
-                              ✓ Renovar / Activar
-                            </button>
-                            <button
-                              onClick={() => openModal('edit', t)}
-                              className="w-full px-4 py-2.5 text-left text-sm font-medium text-blue-400 hover:bg-slate-800"
-                            >
-                              ✎ Editar Comercio
-                            </button>
-                            <button
-                              onClick={() => toggleActive(t)}
-                              disabled={actionId === t.id}
-                              className="w-full px-4 py-2.5 text-left text-sm font-medium text-amber-400 hover:bg-slate-800 disabled:opacity-50"
-                            >
-                              {t.isActive ? '⏸ Suspender' : '▶ Reactivar'}
-                            </button>
-                            <button
-                              onClick={() => openModal('delete', t)}
-                              className="w-full px-4 py-2.5 text-left text-sm font-medium text-red-400 hover:bg-slate-800"
-                            >
-                              🗑 Eliminar
-                            </button>
-                          </div>
-                        )}
-                      </div>
+                    <td className="px-6 py-4 text-right">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const r = e.currentTarget.getBoundingClientRect();
+                          setMenu(menu?.id === t.id ? null : { id: t.id, x: r.right, y: r.bottom });
+                        }}
+                        className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-bold text-slate-300 hover:bg-slate-700"
+                      >
+                        Acciones ▾
+                      </button>
                     </td>
                   </tr>
                 );
               })}
-              {!loading && tenants.length === 0 && (
-                <tr><td colSpan={6} className="px-6 py-16 text-center text-slate-500">No hay comercios registrados.</td></tr>
+              {!loading && visibleTenants.length === 0 && (
+                <tr><td colSpan={6} className="px-6 py-16 text-center text-slate-500">
+                  {tenants.length === 0 ? 'No hay comercios registrados.' : 'Ningún comercio coincide con el filtro.'}
+                </td></tr>
               )}
             </tbody>
           </table>
         </div>
       </main>
+
+      {/* Menú de acciones (portal) — posicionado en coordenadas fijas, nunca recortado */}
+      {menu && (() => {
+        const t = tenants.find((x) => x.id === menu.id);
+        if (!t) return null;
+        return createPortal(
+          <div
+            className="fixed z-[200] w-56 -translate-x-full overflow-hidden rounded-lg border border-slate-700 bg-slate-900 shadow-2xl"
+            style={{ top: menu.y + 4, left: menu.x }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button onClick={() => { setDetailTenant(t); setMenu(null); }}
+              className="w-full px-4 py-2.5 text-left text-sm font-medium text-cyan-400 hover:bg-slate-800">
+              📋 Detalles & Config
+            </button>
+            <button onClick={() => { handleImpersonate(t); setMenu(null); }} disabled={actionId === t.id}
+              className="w-full px-4 py-2.5 text-left text-sm font-medium text-violet-400 hover:bg-slate-800 disabled:opacity-50">
+              🔐 Ingresar como Comercio
+            </button>
+            <button onClick={() => openModal('renew', t)}
+              className="w-full px-4 py-2.5 text-left text-sm font-medium text-emerald-400 hover:bg-slate-800">
+              ✓ Renovar / Activar
+            </button>
+            <button onClick={() => openModal('edit', t)}
+              className="w-full px-4 py-2.5 text-left text-sm font-medium text-blue-400 hover:bg-slate-800">
+              ✎ Editar Comercio
+            </button>
+            <button onClick={() => { toggleActive(t); setMenu(null); }} disabled={actionId === t.id}
+              className="w-full px-4 py-2.5 text-left text-sm font-medium text-amber-400 hover:bg-slate-800 disabled:opacity-50">
+              {t.isActive ? '⏸ Suspender' : '▶ Reactivar'}
+            </button>
+            <button onClick={() => openModal('delete', t)}
+              className="w-full px-4 py-2.5 text-left text-sm font-medium text-red-400 hover:bg-slate-800">
+              🗑 Eliminar
+            </button>
+          </div>,
+          document.body,
+        );
+      })()}
 
       {/* Create Tenant Modal */}
       {modalType === 'create' && (

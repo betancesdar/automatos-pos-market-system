@@ -9,15 +9,20 @@ interface Employee {
   username: string;
   email: string | null;
   role: 'ADMIN' | 'CASHIER' | 'BILLER' | 'ACCOUNTANT';
+  customRoleId?: string | null;
+  customRole?: { id: string; name: string } | null;
   createdAt: string;
 }
 
-const emptyForm: { name: string; username: string; email: string; password: string; role: 'ADMIN' | 'CASHIER' | 'BILLER' | 'ACCOUNTANT' } = {
-  name: '', username: '', email: '', password: '', role: 'CASHIER',
+interface CustomRoleOption { id: string; name: string }
+
+const emptyForm: { name: string; username: string; email: string; password: string; role: 'ADMIN' | 'CASHIER' | 'BILLER' | 'ACCOUNTANT'; customRoleId: string } = {
+  name: '', username: '', email: '', password: '', role: 'CASHIER', customRoleId: '',
 };
 
 export function EmployeesPanel({ tenantId }: { tenantId: string }) {
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [customRoles, setCustomRoles] = useState<CustomRoleOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -30,6 +35,11 @@ export function EmployeesPanel({ tenantId }: { tenantId: string }) {
     try {
       const data = await apiFetch<Employee[]>('/users', tenantId);
       setEmployees(data);
+      // Roles personalizados para el selector (no bloquea si falta el permiso).
+      try {
+        const roles = await apiFetch<{ customRoles: CustomRoleOption[] }>('/roles', tenantId);
+        setCustomRoles(roles.customRoles ?? []);
+      } catch { /* sin permiso roles.manage: el selector queda vacío */ }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al cargar empleados');
     } finally {
@@ -48,7 +58,7 @@ export function EmployeesPanel({ tenantId }: { tenantId: string }) {
 
   const openEdit = (emp: Employee) => {
     setEditingId(emp.id);
-    setForm({ name: emp.name, username: emp.username, email: emp.email ?? '', password: '', role: emp.role });
+    setForm({ name: emp.name, username: emp.username, email: emp.email ?? '', password: '', role: emp.role, customRoleId: emp.customRoleId ?? '' });
     setShowForm(true);
     setError('');
   };
@@ -64,6 +74,7 @@ export function EmployeesPanel({ tenantId }: { tenantId: string }) {
           username: form.username,
           email: form.email || null,
           role: form.role,
+          customRoleId: form.customRoleId || null,
         };
         if (form.password) body.password = form.password;
         await apiFetch(`/users/${editingId}`, tenantId, { method: 'PUT', body: JSON.stringify(body) });
@@ -71,7 +82,7 @@ export function EmployeesPanel({ tenantId }: { tenantId: string }) {
         if (!form.password) throw new Error('La contraseña es obligatoria para nuevos empleados');
         await apiFetch('/users', tenantId, {
           method: 'POST',
-          body: JSON.stringify(form),
+          body: JSON.stringify({ ...form, customRoleId: form.customRoleId || null }),
         });
       }
       setShowForm(false);
@@ -171,6 +182,21 @@ export function EmployeesPanel({ tenantId }: { tenantId: string }) {
                 <option value="ACCOUNTANT">CONTABLE — Contabilidad y reportes</option>
               </select>
             </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                Rol personalizado <span className="text-slate-400">(opcional, suma permisos)</span>
+              </label>
+              <select
+                value={form.customRoleId}
+                onChange={(e) => setForm({ ...form, customRoleId: e.target.value })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2"
+              >
+                <option value="">— Ninguno —</option>
+                {customRoles.map((r) => (
+                  <option key={r.id} value={r.id}>{r.name}</option>
+                ))}
+              </select>
+            </div>
             <div className="flex gap-2 md:col-span-2">
               <button
                 type="button"
@@ -216,6 +242,11 @@ export function EmployeesPanel({ tenantId }: { tenantId: string }) {
                   }`}>
                     {emp.role}
                   </span>
+                  {emp.customRole && (
+                    <span className="ml-1 rounded bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-700">
+                      +{emp.customRole.name}
+                    </span>
+                  )}
                 </td>
                 <td className="px-6 py-3 text-right">
                   <button onClick={() => openEdit(emp)} className="mr-3 text-indigo-600 hover:underline">

@@ -14,7 +14,7 @@ import {
 import type { Response, Request } from 'express';
 import { AuthService, UsersService } from './users.service';
 import { Role } from '@prisma/client';
-import { Public, JwtAuthGuard, Roles } from '../../common/auth.guard';
+import { Public, JwtAuthGuard, RequirePermissions } from '../../common/auth.guard';
 import { COOKIE_NAMES } from '../../common/jwt.util';
 import { TenantId } from '../../common/tenant.decorator';
 
@@ -29,6 +29,7 @@ class CreateUserDto {
   email?: string;
   password: string;
   role: Role;
+  customRoleId?: string | null;
 }
 
 class UpdateUserDto {
@@ -37,6 +38,7 @@ class UpdateUserDto {
   email?: string | null;
   password?: string;
   role?: Role;
+  customRoleId?: string | null;
 }
 
 function cookieOptions() {
@@ -82,7 +84,7 @@ export class AuthController {
   }
 }
 
-@Roles('ADMIN', 'SUPER_ADMIN')
+@RequirePermissions('users.manage')
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}

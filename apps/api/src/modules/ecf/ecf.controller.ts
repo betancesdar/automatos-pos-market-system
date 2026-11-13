@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Put, Body, Param, Query } from '@nestjs/common';
 import { IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
 import { EcfService } from './ecf.service';
-import { Roles } from '../../common/auth.guard';
+import { RequirePermissions } from '../../common/auth.guard';
 import { TenantId } from '../../common/tenant.decorator';
 
 class UpsertEcfConfigDto {
@@ -27,25 +27,25 @@ class UpsertEcfConfigDto {
 export class EcfController {
   constructor(private readonly ecfService: EcfService) {}
 
-  @Roles('ADMIN', 'ACCOUNTANT', 'SUPER_ADMIN')
+  @RequirePermissions('ecf.view')
   @Get('submissions')
   listSubmissions(@TenantId() tenantId: string, @Query('status') status?: string) {
     return this.ecfService.listSubmissions(tenantId, status);
   }
 
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @RequirePermissions('ecf.manage')
   @Post('submissions/:id/retry')
   retry(@TenantId() tenantId: string, @Param('id') id: string) {
     return this.ecfService.retrySubmission(tenantId, id);
   }
 
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @RequirePermissions('ecf.manage')
   @Get('config')
   getConfig(@TenantId() tenantId: string) {
     return this.ecfService.getConfig(tenantId);
   }
 
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @RequirePermissions('ecf.manage')
   @Put('config')
   upsertConfig(@TenantId() tenantId: string, @Body() body: UpsertEcfConfigDto) {
     return this.ecfService.upsertConfig(tenantId, body);

@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { Role } from '@prisma/client';
 import { hashPassword, verifyPassword } from '../../common/password.util';
 import { signToken } from '../../common/jwt.util';
+import { effectivePermissions } from '../../common/permissions.catalog';
 
 export interface AuthUserDto {
   id: string;
@@ -11,6 +12,7 @@ export interface AuthUserDto {
   email: string | null;
   role: Role;
   tenantId: string | null;
+  permissions: string[];
 }
 
 @Injectable()
@@ -26,10 +28,13 @@ export class AuthService {
           { email: { equals: normalizedIdentifier.toLowerCase(), mode: 'insensitive' } },
         ],
       },
+      include: { customRole: true },
     });
     if (!user || !verifyPassword(password, user.password)) {
       throw new UnauthorizedException('Invalid username/email or password');
     }
+
+    const permissions = effectivePermissions(user.role, user.customRole?.permissionCodes);
 
     const userDto: AuthUserDto = {
       id: user.id,
@@ -38,6 +43,7 @@ export class AuthService {
       email: user.email,
       role: user.role,
       tenantId: user.tenantId,
+      permissions,
     };
 
     const token = signToken({
@@ -46,13 +52,17 @@ export class AuthService {
       username: user.username,
       role: user.role,
       tenantId: user.tenantId,
+      permissions,
     });
 
     return { user: userDto, token };
   }
 
   async getMe(userId: string): Promise<AuthUserDto> {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { customRole: true },
+    });
     if (!user) throw new UnauthorizedException('User not found');
     return {
       id: user.id,
@@ -61,6 +71,7 @@ export class AuthService {
       email: user.email,
       role: user.role,
       tenantId: user.tenantId,
+      permissions: effectivePermissions(user.role, user.customRole?.permissionCodes),
     };
   }
 }
@@ -72,14 +83,27 @@ export class UsersService {
   async listUsers(tenantId: string) {
     return this.prisma.user.findMany({
       where: { tenantId },
-      select: { id: true, name: true, username: true, email: true, role: true, createdAt: true },
+      select: {
+        id: true, name: true, username: true, email: true, role: true, createdAt: true,
+        customRoleId: true,
+        customRole: { select: { id: true, name: true } },
+      },
       orderBy: { name: 'asc' },
     });
   }
 
+  /** Valida que el rol personalizado exista y pertenezca al tenant. */
+  private async assertCustomRole(tenantId: string, customRoleId: string) {
+    const role = await this.prisma.customRole.findFirst({
+      where: { id: customRoleId, tenantId },
+      select: { id: true },
+    });
+    if (!role) throw new BadRequestException('Rol personalizado inválido');
+  }
+
   async createUser(
     tenantId: string,
-    data: { name: string; username: string; email?: string; password: string; role: Role },
+    data: { name: string; username: string; email?: string; password: string; role: Role; customRoleId?: string | null },
   ) {
     if (!data.name?.trim()) throw new BadRequestException('Name is required');
     if (!data.username?.trim()) throw new BadRequestException('Username is required');
@@ -115,6 +139,8 @@ export class UsersService {
       if (existingEmail) throw new ConflictException('Email already in use');
     }
 
+    if (data.customRoleId) await this.assertCustomRole(tenantId, data.customRoleId);
+
     return this.prisma.user.create({
       data: {
         tenantId,
@@ -123,15 +149,19 @@ export class UsersService {
         email: data.email?.trim().toLowerCase() || null,
         password: hashPassword(data.password),
         role: data.role,
+        customRoleId: data.customRoleId || null,
       },
-      select: { id: true, name: true, username: true, email: true, role: true, createdAt: true },
+      select: {
+        id: true, name: true, username: true, email: true, role: true, createdAt: true,
+        customRoleId: true, customRole: { select: { id: true, name: true } },
+      },
     });
   }
 
   async updateUser(
     tenantId: string,
     userId: string,
-    data: { name?: string; username?: string; email?: string | null; password?: string; role?: Role },
+    data: { name?: string; username?: string; email?: string | null; password?: string; role?: Role; customRoleId?: string | null },
   ) {
     const user = await this.prisma.user.findFirst({ where: { id: userId, tenantId } });
     if (!user) throw new NotFoundException('User not found');
@@ -152,6 +182,8 @@ export class UsersService {
       throw new BadRequestException('Role must be ADMIN, CASHIER, BILLER or ACCOUNTANT');
     }
 
+    if (data.customRoleId) await this.assertCustomRole(tenantId, data.customRoleId);
+
     return this.prisma.user.update({
       where: { id: userId },
       data: {
@@ -159,9 +191,13 @@ export class UsersService {
         username: data.username?.trim().toLowerCase(),
         ...(data.email !== undefined && { email: data.email?.trim().toLowerCase() || null }),
         role: data.role,
+        ...(data.customRoleId !== undefined && { customRoleId: data.customRoleId || null }),
         ...(data.password ? { password: hashPassword(data.password) } : {}),
       },
-      select: { id: true, name: true, username: true, email: true, role: true, createdAt: true },
+      select: {
+        id: true, name: true, username: true, email: true, role: true, createdAt: true,
+        customRoleId: true, customRole: { select: { id: true, name: true } },
+      },
     });
   }
 

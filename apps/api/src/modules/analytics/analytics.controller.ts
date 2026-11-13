@@ -1,9 +1,9 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
-import { Roles } from '../../common/auth.guard';
+import { RequirePermissions } from '../../common/auth.guard';
 import { TenantId } from '../../common/tenant.decorator';
 
-@Roles('ADMIN', 'ACCOUNTANT', 'SUPER_ADMIN')
+@RequirePermissions('analytics.view')
 @Controller('analytics')
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}

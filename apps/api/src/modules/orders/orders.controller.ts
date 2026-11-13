@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { OrdersService } from './orders.service';
-import { Roles } from '../../common/auth.guard';
+import { RequirePermissions } from '../../common/auth.guard';
 import { TenantId } from '../../common/tenant.decorator';
 import type { TokenPayload } from '../../common/jwt.util';
 import {
@@ -25,7 +25,7 @@ import {
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 
-  @Roles('BILLER', 'CASHIER', 'ADMIN', 'SUPER_ADMIN')
+  @RequirePermissions('orders.create')
   @Post()
   create(
     @TenantId() tenantId: string,
@@ -35,13 +35,17 @@ export class OrdersController {
     return this.ordersService.create(tenantId, req.user.sub, body);
   }
 
-  @Roles('BILLER', 'CASHIER', 'ADMIN', 'SUPER_ADMIN')
+  @RequirePermissions('orders.create', 'orders.checkout')
   @Get()
-  list(@TenantId() tenantId: string, @Query('status') status?: string) {
-    return this.ordersService.list(tenantId, status);
+  list(
+    @TenantId() tenantId: string,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.ordersService.list(tenantId, status, search);
   }
 
-  @Roles('CASHIER', 'ADMIN', 'SUPER_ADMIN')
+  @RequirePermissions('orders.checkout')
   @Get('by-code/:code')
   getByCode(@TenantId() tenantId: string, @Param('code') code: string) {
     const parsed = parseInt(code.replace(/\D/g, ''), 10);
@@ -51,7 +55,7 @@ export class OrdersController {
     return this.ordersService.getByCode(tenantId, parsed);
   }
 
-  @Roles('CASHIER', 'ADMIN', 'SUPER_ADMIN')
+  @RequirePermissions('orders.checkout')
   @Patch(':id')
   update(
     @TenantId() tenantId: string,
@@ -61,7 +65,7 @@ export class OrdersController {
     return this.ordersService.update(tenantId, id, body);
   }
 
-  @Roles('CASHIER', 'ADMIN', 'SUPER_ADMIN')
+  @RequirePermissions('orders.checkout')
   @Post(':id/checkout')
   checkout(
     @TenantId() tenantId: string,
@@ -72,7 +76,7 @@ export class OrdersController {
     return this.ordersService.checkout(tenantId, id, req.user.sub, body);
   }
 
-  @Roles('BILLER', 'CASHIER', 'ADMIN', 'SUPER_ADMIN')
+  @RequirePermissions('orders.cancel')
   @Post(':id/cancel')
   cancel(
     @TenantId() tenantId: string,

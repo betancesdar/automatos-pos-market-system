@@ -20,7 +20,7 @@ interface Props {
  */
 export function PendingOrdersPanel({ tenantId, activeOrderId, onSelect, onClearActive }: Props) {
   const [orders, setOrders] = useState<PendingOrder[]>([]);
-  const [codeInput, setCodeInput] = useState('');
+  const [search, setSearch] = useState('');
   const [error, setError] = useState('');
   const [collapsed, setCollapsed] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -42,21 +42,43 @@ export function PendingOrdersPanel({ tenantId, activeOrderId, onSelect, onClearA
     };
   }, [load]);
 
-  const findByCode = async () => {
-    const code = parseInt(codeInput.replace(/\D/g, ''), 10);
-    if (!code) return;
+  // Filtro en vivo por código (#) o nombre del cliente.
+  const term = search.trim().toLowerCase();
+  const digits = term.replace(/\D/g, '');
+  const filtered = term
+    ? orders.filter((o) => {
+        const byName = (o.clientName || '').toLowerCase().includes(term);
+        const byCode = digits ? String(o.dailyCode).includes(digits) : false;
+        return byName || byCode;
+      })
+    : orders;
+
+  const onSubmit = async () => {
     setError('');
-    try {
-      const order = await apiFetch<PendingOrder>(`/orders/by-code/${code}`, tenantId);
-      if (order.status !== 'PENDING') {
-        setError(`El pedido #${code} ya fue ${order.status === 'COMPLETED' ? 'cobrado' : 'cancelado'}`);
-        return;
-      }
-      setCodeInput('');
-      onSelect(order);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : `No se encontró el pedido #${code}`);
+    if (!term) return;
+    // Si hay exactamente un resultado en la lista, cárgalo directo.
+    if (filtered.length === 1 && filtered[0]) {
+      setSearch('');
+      onSelect(filtered[0]);
+      return;
     }
+    // Si no hay match en la lista local pero el texto es un número, búscalo en el servidor.
+    if (filtered.length === 0 && digits) {
+      const code = parseInt(digits, 10);
+      try {
+        const order = await apiFetch<PendingOrder>(`/orders/by-code/${code}`, tenantId);
+        if (order.status !== 'PENDING') {
+          setError(`El pedido #${code} ya fue ${order.status === 'COMPLETED' ? 'cobrado' : 'cancelado'}`);
+          return;
+        }
+        setSearch('');
+        onSelect(order);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : `No se encontró el pedido #${code}`);
+      }
+      return;
+    }
+    if (filtered.length === 0) setError('Ningún pedido coincide con la búsqueda');
   };
 
   const timeOf = (iso: string) =>
@@ -85,20 +107,27 @@ export function PendingOrdersPanel({ tenantId, activeOrderId, onSelect, onClearA
             </button>
           )}
           <input
-            value={codeInput}
-            onChange={(e) => setCodeInput(e.target.value)}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
-                findByCode();
+                onSubmit();
               }
             }}
-            placeholder="# código"
-            inputMode="numeric"
-            className="w-24 rounded-lg border border-indigo-200 bg-white px-2 py-1 text-sm font-bold tabular-nums outline-none focus:border-indigo-400"
+            placeholder="# o nombre del cliente"
+            className="w-56 rounded-lg border border-indigo-200 bg-white px-3 py-1 text-sm font-semibold outline-none focus:border-indigo-400"
           />
+          {search && (
+            <button
+              onClick={() => { setSearch(''); setError(''); }}
+              className="rounded-lg border border-indigo-200 bg-white px-2 py-1 text-xs font-semibold text-indigo-600 hover:bg-indigo-50"
+            >
+              ✕
+            </button>
+          )}
           <button
-            onClick={findByCode}
+            onClick={onSubmit}
             className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-bold text-white hover:bg-indigo-500"
           >
             Buscar
@@ -110,9 +139,9 @@ export function PendingOrdersPanel({ tenantId, activeOrderId, onSelect, onClearA
         <p className="px-4 pb-2 text-xs font-semibold text-red-600">{error}</p>
       )}
 
-      {!collapsed && orders.length > 0 && (
+      {!collapsed && filtered.length > 0 && (
         <div className="flex gap-2 overflow-x-auto px-4 pb-3">
-          {orders.map((order) => (
+          {filtered.map((order) => (
             <button
               key={order.id}
               onClick={() => onSelect(order)}
@@ -137,6 +166,12 @@ export function PendingOrdersPanel({ tenantId, activeOrderId, onSelect, onClearA
             </button>
           ))}
         </div>
+      )}
+
+      {!collapsed && filtered.length === 0 && orders.length > 0 && (
+        <p className="px-4 pb-3 text-xs text-indigo-400">
+          Ningún pedido coincide con «{search}».
+        </p>
       )}
 
       {!collapsed && orders.length === 0 && (

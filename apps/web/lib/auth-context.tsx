@@ -12,6 +12,8 @@ interface AuthContextValue {
   login: (identifier: string, password: string) => Promise<AuthUser>;
   logout: () => Promise<void>;
   setLicenseBlocked: (message: string) => void;
+  /** ¿El usuario tiene al menos uno de los permisos? '*' satisface todo. */
+  can: (...permissions: string[]) => boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -58,12 +60,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLicenseMessage(message);
   }, []);
 
+  const can = useCallback(
+    (...permissions: string[]) => {
+      const granted = user?.permissions;
+      if (!granted?.length) return false;
+      if (granted.includes('*')) return true;
+      return permissions.some((p) => granted.includes(p));
+    },
+    [user],
+  );
+
   if (licenseBlocked) {
     return <LicenseBlockedScreen message={licenseMessage} onLogout={logout} />;
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, licenseBlocked, licenseMessage, login, logout, setLicenseBlocked }}>
+    <AuthContext.Provider value={{ user, loading, licenseBlocked, licenseMessage, login, logout, setLicenseBlocked, can }}>
       {children}
     </AuthContext.Provider>
   );

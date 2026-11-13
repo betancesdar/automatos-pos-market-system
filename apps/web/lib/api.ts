@@ -12,6 +12,8 @@ export interface AuthUser {
   email: string | null;
   role: 'SUPER_ADMIN' | 'ADMIN' | 'CASHIER' | 'BILLER' | 'ACCOUNTANT';
   tenantId: string | null;
+  // Permisos efectivos (RBAC). '*' = todos (SUPER_ADMIN).
+  permissions?: string[];
 }
 
 export class LicenseBlockedError extends Error {

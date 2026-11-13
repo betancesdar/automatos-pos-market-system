@@ -1,7 +1,7 @@
 import { Controller, Get, Put, Body } from '@nestjs/common';
 import { TenantService } from './tenant.service';
 import { NcfType } from '@prisma/client';
-import { Roles } from '../../common/auth.guard';
+import { RequirePermissions } from '../../common/auth.guard';
 import { TenantId } from '../../common/tenant.decorator';
 
 class UpdateTenantDto {
@@ -26,7 +26,7 @@ export class TenantController {
     return this.tenantService.getTenant(tenantId);
   }
 
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @RequirePermissions('tenant.manage')
   @Put()
   updateTenant(@TenantId() tenantId: string, @Body() body: UpdateTenantDto) {
     return this.tenantService.updateTenant(tenantId, body);
