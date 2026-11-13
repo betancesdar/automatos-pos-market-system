@@ -59,9 +59,26 @@ WHERE t."invoiceCounter" = 0;
 - [ ] Cerrar caja con diferencia → aparece en Contabilidad → Conciliaciones como PENDIENTE.
 - [ ] Reportes 606/607/608 descargan TXT; cierre mensual exige conciliaciones revisadas.
 
+## 5.1 Despliegue 2.1 — PASO CRÍTICO antes del primer `migrate deploy`
+La versión 2.1 cambia el entrypoint de `prisma db push` a **`prisma migrate deploy`**.
+Como la DB de producción venía de `db push` (sin historial de migraciones), el primer
+`migrate deploy` intentaría correr `0_init` sobre tablas que YA existen y fallaría.
+**Antes de desplegar 2.1, baseline la DB de producción una sola vez:**
+```sh
+cd packages/database
+npx prisma migrate resolve --applied 0_init
+# (si la 2.0 ya estaba en prod; marca el esquema actual como el baseline)
+```
+Después, `migrate deploy` aplicará solo `20261113141254_rbac_custom_roles` (aditiva:
+crea `CustomRole` + `User.customRoleId`, no toca datos). Verificar con `migrate status`.
+
+Nota RBAC: los permisos van embebidos en el JWT; **los usuarios deben re-loguearse**
+tras el deploy para recibir sus permisos (los tokens viejos caen a los permisos del
+rol base automáticamente, así que nada se rompe mientras tanto).
+
 ## 6. Pendiente / deuda técnica (no bloquea el lanzamiento)
 - `.env.production` sigue en git → sacarlo (`git rm --cached`) y **rotar JWT_SECRET/COOKIE_SECRET/DB/Redis** (rotar JWT invalida sesiones: hacerlo de noche).
-- Migrar `db push` → `prisma migrate` (baseline con `migrate diff` + `migrate resolve --applied`).
+- ~~Migrar `db push` → `prisma migrate`~~ ✅ hecho en 2.1 (baseline `0_init`). Ver §5.1.
 - Float → Decimal en montos; enums para `Sale.status`/`CashSession.status`; throttler en `/auth/login`; `ValidationPipe whitelist:true` cuando todos los DTOs estén decorados.
 - e-CF producción: requiere certificado digital .p12 del contribuyente + certificación DGII (proceso con Pronesoft). El layout exacto de columnas 606/607/608 debe validarlo el contable contra la herramienta de envío de la DGII antes de la primera presentación.
 - Token de impersonación en localStorage; refactor de `pos/page.tsx`; WebSocket para la cola de caja (hoy polling 4 s).
