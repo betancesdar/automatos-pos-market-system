@@ -1,7 +1,8 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NcfType, PaymentMethod, Prisma } from '@prisma/client';
 import { buildSaleReceipt } from '../../common/escpos.util';
+import { EcfService } from '../ecf/ecf.service';
 
 const ITBIS_RATE = 0.18;
 
@@ -55,7 +56,24 @@ interface ListSalesFilters {
 
 @Injectable()
 export class SalesService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(SalesService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    private ecfService: EcfService,
+  ) {}
+
+  /**
+   * Post-commit, fire-and-forget e-CF enqueue. GOLDEN RULE: a sale never
+   * fails, blocks, or slows down because of electronic invoicing.
+   */
+  enqueueEcfSafe(sale: { id: string; tenantId: string; ncfType: NcfType }) {
+    this.ecfService.enqueueSale(sale).catch((err) => {
+      this.logger.warn(
+        `e-CF enqueue failed for sale ${sale.id} (non-blocking): ${err instanceof Error ? err.message : err}`,
+      );
+    });
+  }
 
   async checkout(tenantId: string, data: CheckoutData, userId: string) {
     // ── Cash Register Audit: a checkout can only happen inside an OPEN cash session ──
@@ -69,9 +87,12 @@ export class SalesService {
       );
     }
 
-    return this.prisma.$transaction((tx) =>
+    const result = await this.prisma.$transaction((tx) =>
       this.processSale(tx, tenantId, data, { cashSessionId: openSession.id }),
     );
+
+    this.enqueueEcfSafe(result.sale);
+    return result;
   }
 
   /**
@@ -118,6 +139,7 @@ export class SalesService {
           }),
         );
 
+        this.enqueueEcfSafe(sale);
         results.push({ offlineId: saleData.offlineId, status: 'synced', saleId: sale.id, invoiceNumber: sale.invoiceNumber });
       } catch (err) {
         results.push({
@@ -132,12 +154,14 @@ export class SalesService {
   }
 
   /**
-   * Core sale-processing logic shared by live checkout and offline sync.
+   * Core sale-processing logic shared by live checkout, offline sync, and
+   * the biller/cashier order checkout (OrdersService).
    * Must run inside a `$transaction` — validates stock, computes totals,
    * generates invoice/NCF numbers, deducts stock, and builds the ESC/POS
-   * receipt.
+   * receipt. Stock, invoiceNumber and NCF all use single-statement atomic
+   * updates (row locks) so concurrent checkouts never collide.
    */
-  private async processSale(
+  async processSale(
     tx: Prisma.TransactionClient,
     tenantId: string,
     data: CheckoutData,
@@ -163,10 +187,6 @@ export class SalesService {
         const isLoose = item.isLoose ?? unitPrice !== product.price;
         const lineTotal = unitPrice * qty;
 
-        if (!isLoose && product.stock < Math.ceil(qty)) {
-          throw new BadRequestException(`Insufficient stock for ${product.name}`);
-        }
-
         subtotal += lineTotal;
         saleItemsData.push({
           productId: product.id,
@@ -178,10 +198,14 @@ export class SalesService {
 
         if (!isLoose && qty > 0) {
           const stockDeduct = Math.ceil(qty);
-          await tx.product.update({
-            where: { id: product.id },
-            data: { stock: Math.max(0, product.stock - stockDeduct) },
-          });
+          // Atomic check-and-decrement: the WHERE clause guarantees we never
+          // oversell under concurrent checkouts (no read-then-write race).
+          const updated = await tx.$executeRaw`
+            UPDATE "Product" SET stock = stock - ${stockDeduct}
+            WHERE id = ${product.id} AND stock >= ${stockDeduct}`;
+          if (updated === 0) {
+            throw new BadRequestException(`Insufficient stock for ${product.name}`);
+          }
         }
       }
 
@@ -214,21 +238,33 @@ export class SalesService {
         }
       }
 
-      // Sequential per-tenant invoice number (e.g. INV-00001).
-      const saleCount = await tx.sale.count({ where: { tenantId } });
-      const invoiceNumber = `INV-${String(saleCount + 1).padStart(5, '0')}`;
+      // Sequential per-tenant invoice number (e.g. INV-00001), from an atomic
+      // counter — count()+1 collided under concurrency and broke on deletes.
+      const invoiceRows = await tx.$queryRaw<{ invoiceCounter: number }[]>`
+        UPDATE "Tenant" SET "invoiceCounter" = "invoiceCounter" + 1
+        WHERE id = ${tenantId}
+        RETURNING "invoiceCounter"`;
+      if (!invoiceRows.length) {
+        throw new BadRequestException('Tenant not found');
+      }
+      const invoiceNumber = `INV-${String(invoiceRows[0].invoiceCounter).padStart(5, '0')}`;
 
       let ncf: string | null = null;
       if (NCF_GENERATING_TYPES.includes(data.ncfType)) {
-        const seq = await tx.nCFSequence.findUnique({
-          where: { tenantId_type: { tenantId, type: data.ncfType } },
-        });
-        if (seq) {
-          ncf = `${seq.prefix}${seq.nextValue.toString().padStart(8, '0')}`;
-          await tx.nCFSequence.update({
-            where: { id: seq.id },
-            data: { nextValue: seq.nextValue + 1 },
-          });
+        // Single-statement increment with row lock: two concurrent fiscal
+        // sales can never receive the same NCF.
+        const seqRows = await tx.$queryRaw<{ prefix: string; nextValue: number }[]>`
+          UPDATE "NCFSequence"
+          SET "nextValue" = "nextValue" + 1, "updatedAt" = NOW()
+          WHERE "tenantId" = ${tenantId} AND "type" = ${data.ncfType}::"NcfType"
+          RETURNING prefix, "nextValue"`;
+        if (seqRows.length) {
+          const used = seqRows[0].nextValue - 1;
+          ncf = `${seqRows[0].prefix}${used.toString().padStart(8, '0')}`;
+        } else {
+          this.logger.warn(
+            `Venta fiscal sin secuencia NCF configurada (tenant=${tenantId}, type=${data.ncfType}) — se emite sin NCF`,
+          );
         }
       }
 

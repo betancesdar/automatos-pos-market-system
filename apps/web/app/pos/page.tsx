@@ -21,6 +21,8 @@ import { CloseCashSessionModal } from '../../components/pos/CloseCashSessionModa
 import { SalesHistoryModal } from '../../components/pos/SalesHistoryModal';
 import { ShiftDetailsModal } from '../../components/pos/ShiftDetailsModal';
 import { CashMovementModal } from '../../components/pos/CashMovementModal';
+import { PendingOrdersPanel } from '../../components/pos/PendingOrdersPanel';
+import { SendToCashierModal } from '../../components/pos/SendToCashierModal';
 import { useAuth } from '../../lib/auth-context';
 import { apiFetch, LicenseBlockedError } from '../../lib/api';
 import { useOfflineSync } from '../../lib/useOfflineSync';
@@ -36,8 +38,10 @@ import {
   type CartLine,
   type CashSession,
   type Category,
+  type PendingOrder,
   type PosProduct,
   type ReceiptTypeValue,
+  type WorkflowMode,
   lineTotal,
   productEmoji,
 } from '../../lib/pos-types';
@@ -144,6 +148,10 @@ export default function POSPage() {
 
   const [cashSession, setCashSession] = useState<CashSession | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
+  // Flujo Facturador/Caja
+  const [workflowMode, setWorkflowMode] = useState<WorkflowMode>('DIRECT');
+  const [activeOrder, setActiveOrder] = useState<PendingOrder | null>(null);
+  const [showSendToCashier, setShowSendToCashier] = useState(false);
   const [showCloseSession, setShowCloseSession] = useState(false);
   const [offlineNoticeMessage, setOfflineNoticeMessage] = useState('');
   const [usingCachedCatalog, setUsingCachedCatalog] = useState(false);
@@ -153,6 +161,10 @@ export default function POSPage() {
   const [shiftRefreshKey, setShiftRefreshKey] = useState(0);
 
   const { isOnline, pendingCount, syncing, syncNow } = useOfflineSync(tenantId);
+
+  const isBiller = user?.role === 'BILLER';
+  const isCashierStation =
+    workflowMode === 'BILLER_CASHIER' && (user?.role === 'CASHIER' || user?.role === 'ADMIN');
 
   const receiptConfig = RECEIPT_TYPES.find((r) => r.value === receiptType)!;
   const subtotal = cart.reduce((s, i) => s + lineTotal(i), 0);
@@ -267,6 +279,50 @@ export default function POSPage() {
   }, [tenantId, setLicenseBlocked]);
 
   useEffect(() => { loadCashSession(); }, [loadCashSession]);
+
+  // Load tenant workflow mode (cached locally so the POS boots fast offline).
+  useEffect(() => {
+    if (!tenantId) return;
+    try {
+      const cached = window.localStorage.getItem(`mm_workflow_${tenantId}`);
+      if (cached === 'DIRECT' || cached === 'BILLER_CASHIER') setWorkflowMode(cached);
+    } catch { /* localStorage unavailable — ignore */ }
+
+    apiFetch<{ workflowMode?: string }>('/tenant', tenantId)
+      .then((t) => {
+        const mode: WorkflowMode = t.workflowMode === 'BILLER_CASHIER' ? 'BILLER_CASHIER' : 'DIRECT';
+        setWorkflowMode(mode);
+        try { window.localStorage.setItem(`mm_workflow_${tenantId}`, mode); } catch { /* ignore */ }
+      })
+      .catch(() => { /* offline — keep cached mode */ });
+  }, [tenantId]);
+
+  /** Cashier picked a pending order: load its items into the cart for review/charge. */
+  const loadOrderIntoCart = (order: PendingOrder) => {
+    setActiveOrder(order);
+    setCart(
+      order.items.map((item) => ({
+        cartId: newCartId(),
+        productId: item.productId,
+        name: item.product?.name ?? 'Producto',
+        basePrice: item.unitPrice,
+        unitPrice: item.unitPrice,
+        quantity: item.quantity,
+        isLoose: item.isLoose,
+      })),
+    );
+    setDiscountAmount(0);
+    const orderNcf = RECEIPT_TYPES.find((r) => r.value === order.ncfType);
+    if (orderNcf) setReceiptType(orderNcf.value);
+    setClientRnc(order.clientRnc ?? '');
+  };
+
+  const clearActiveOrder = () => {
+    setActiveOrder(null);
+    setCart([]);
+    setDiscountAmount(0);
+    setClientRnc('');
+  };
 
   useEffect(() => {
     const cfg = RECEIPT_TYPES.find((r) => r.value === receiptType)!;
@@ -400,6 +456,25 @@ export default function POSPage() {
     resetCheckoutForm();
   };
 
+  interface CheckoutResponse {
+    receiptRaw?: string;
+    sale: {
+      ncf?: string | null;
+      ncfType?: string | null;
+      invoiceNumber?: string | null;
+      total: number;
+      subtotal: number;
+      itbis: number;
+      applyItbis: boolean;
+      totalReceived: number;
+      totalChange: number;
+      paymentMethod: string;
+      createdAt: string;
+      items: { quantity: number; price: number; product: { name: string } }[];
+      tenant: { name: string; commercialName?: string | null; rnc?: string | null; address?: string | null; phone?: string | null; receiptFooter?: string | null };
+    };
+  }
+
   const finalizeSale = async () => {
     setCheckoutError('');
     setOfflineNoticeMessage('');
@@ -419,6 +494,55 @@ export default function POSPage() {
       return;
     }
 
+    // ── Cobro de un pedido de facturador (modo BILLER_CASHIER): solo online ──
+    if (activeOrder) {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        setCheckoutError('Cobrar un pedido de facturador requiere conexión a internet');
+        return;
+      }
+      try {
+        // Push any cashier-side edits (quantities/prices) back to the order
+        // so the server charges exactly what's on screen.
+        await apiFetch(`/orders/${activeOrder.id}`, tenantId, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            items: cart.map((i) => ({
+              productId: i.productId,
+              quantity: i.quantity,
+              unitPrice: i.unitPrice,
+              isLoose: i.isLoose,
+            })),
+          }),
+        });
+
+        const data = await apiFetch<CheckoutResponse>(
+          `/orders/${activeOrder.id}/checkout`, tenantId,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              cashReceived: received,
+              paymentMethod,
+              ncfType: receiptType,
+              applyItbis,
+              clientRnc: receiptConfig.needsRnc ? clientRnc : undefined,
+              discountAmount: discountAmount > 0 ? discountAmount : undefined,
+            }),
+          },
+        );
+        setActiveOrder(null);
+        await completeSale(data);
+      } catch (err) {
+        if (err instanceof LicenseBlockedError) {
+          setLicenseBlocked(err.message);
+          return;
+        }
+        const msg = err instanceof Error ? err.message : 'Error al cobrar el pedido';
+        setCheckoutError(msg);
+        if (msg.toLowerCase().includes('caja')) loadCashSession();
+      }
+      return;
+    }
+
     // No internet at all — skip the network round-trip entirely.
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       await finalizeSaleOffline(received);
@@ -426,24 +550,7 @@ export default function POSPage() {
     }
 
     try {
-      const data = await apiFetch<{
-        receiptRaw?: string;
-        sale: {
-          ncf?: string | null;
-          ncfType?: string | null;
-          invoiceNumber?: string | null;
-          total: number;
-          subtotal: number;
-          itbis: number;
-          applyItbis: boolean;
-          totalReceived: number;
-          totalChange: number;
-          paymentMethod: string;
-          createdAt: string;
-          items: { quantity: number; price: number; product: { name: string } }[];
-          tenant: { name: string; commercialName?: string | null; rnc?: string | null; address?: string | null; phone?: string | null; receiptFooter?: string | null };
-        };
-      }>(
+      const data = await apiFetch<CheckoutResponse>(
         '/sales/checkout', tenantId,
         {
           method: 'POST',
@@ -451,6 +558,31 @@ export default function POSPage() {
         },
       );
 
+      await completeSale(data);
+    } catch (err) {
+      if (err instanceof LicenseBlockedError) {
+        setLicenseBlocked(err.message);
+        return;
+      }
+
+      // A genuine connectivity failure (fetch couldn't even reach our own
+      // Next.js server / the API) — not a business validation error from
+      // the backend. Queue the sale offline instead of blocking the cashier.
+      const isNetworkFailure = err instanceof TypeError || (typeof navigator !== 'undefined' && !navigator.onLine);
+      if (isNetworkFailure) {
+        await finalizeSaleOffline(received);
+        return;
+      }
+
+      const msg = err instanceof Error ? err.message : 'Error en facturación';
+      setCheckoutError(msg);
+      if (msg.toLowerCase().includes('caja')) loadCashSession();
+    }
+  };
+
+  /** Shared post-checkout path: persist tenant profile, print, reset the form. */
+  const completeSale = async (data: CheckoutResponse) => {
+    {
       saveTenantProfile(tenantId, {
         name: data.sale.tenant.name,
         commercialName: data.sale.tenant.commercialName,
@@ -499,24 +631,6 @@ export default function POSPage() {
       });
       resetCheckoutForm();
       loadProducts();
-    } catch (err) {
-      if (err instanceof LicenseBlockedError) {
-        setLicenseBlocked(err.message);
-        return;
-      }
-
-      // A genuine connectivity failure (fetch couldn't even reach our own
-      // Next.js server / the API) — not a business validation error from
-      // the backend. Queue the sale offline instead of blocking the cashier.
-      const isNetworkFailure = err instanceof TypeError || (typeof navigator !== 'undefined' && !navigator.onLine);
-      if (isNetworkFailure) {
-        await finalizeSaleOffline(received);
-        return;
-      }
-
-      const msg = err instanceof Error ? err.message : 'Error en facturación';
-      setCheckoutError(msg);
-      if (msg.toLowerCase().includes('caja')) loadCashSession();
     }
   };
 
@@ -551,6 +665,13 @@ export default function POSPage() {
 
       if (inField && !isShortcut) return;
 
+      // Biller station: payment/checkout shortcuts become "Enviar a Caja".
+      if (isBiller && ['F8', 'F9', 'F10', 'F12'].includes(e.key)) {
+        e.preventDefault();
+        if (cart.length) setShowSendToCashier(true);
+        return;
+      }
+
       switch (e.key) {
         case 'F1': e.preventDefault(); searchRef.current?.focus(); break;
         case 'F2': e.preventDefault(); focusClientRnc(); break;
@@ -569,9 +690,10 @@ export default function POSPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [cart, activeLineId, discountAmount]);
+  }, [cart, activeLineId, discountAmount, isBiller]);
 
-  if (checkingSession) {
+  // Billers don't charge, so they don't need (or get) a cash session.
+  if (!isBiller && checkingSession) {
     return (
       <div className="flex h-screen items-center justify-center bg-slate-100 font-sans text-slate-400">
         Verificando estado de caja…
@@ -579,7 +701,7 @@ export default function POSPage() {
     );
   }
 
-  if (!cashSession) {
+  if (!isBiller && !cashSession) {
     return (
       <OpenCashSessionModal
         tenantId={tenantId}
@@ -625,6 +747,20 @@ export default function POSPage() {
         onClose={() => setShowCashMovement(false)}
         onSaved={() => setShiftRefreshKey((k) => k + 1)}
       />
+      <SendToCashierModal
+        isOpen={showSendToCashier}
+        tenantId={tenantId}
+        cart={cart}
+        total={grandTotal}
+        ncfType={receiptType}
+        clientRnc={receiptConfig.needsRnc ? clientRnc : undefined}
+        onClose={() => setShowSendToCashier(false)}
+        onSent={() => {
+          setCart([]);
+          setDiscountAmount(0);
+          setClientRnc('');
+        }}
+      />
 
       {/* Top bar */}
       <header className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-5 py-3 shadow-sm">
@@ -632,7 +768,9 @@ export default function POSPage() {
           <h1 className="text-lg font-bold text-slate-900">
             <span className="text-indigo-600">Mini</span>Market POS
           </h1>
-          <p className="text-xs text-slate-500">{user?.name} · Terminal de ventas</p>
+          <p className="text-xs text-slate-500">
+            {user?.name} · {isBiller ? 'Estación de facturación' : isCashierStation ? 'Caja central' : 'Terminal de ventas'}
+          </p>
         </div>
 
         {/* Online/Offline connectivity badge + manual sync */}
@@ -676,37 +814,51 @@ export default function POSPage() {
               longer floats over the cart/checkout totals. */}
           <ReceiptPrinter variant="compact" />
 
-          <button
-            onClick={() => setShowSalesHistory(true)}
-            title="Historial de Ventas — contingencia si se acaba el papel"
-            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
-          >
-            🧾 Historial
-          </button>
+          {!isBiller && (
+            <>
+              <button
+                onClick={() => setShowSalesHistory(true)}
+                title="Historial de Ventas — contingencia si se acaba el papel"
+                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
+              >
+                🧾 Historial
+              </button>
 
-          <button
-            onClick={() => setShowShiftDetails(true)}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
-          >
-            📊 Turno
-          </button>
+              <button
+                onClick={() => setShowShiftDetails(true)}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
+              >
+                📊 Turno
+              </button>
 
-          <button
-            onClick={() => setShowCashMovement(true)}
-            className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-100"
-          >
-            💵 Movimiento
-          </button>
+              <button
+                onClick={() => setShowCashMovement(true)}
+                className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-100"
+              >
+                💵 Movimiento
+              </button>
 
-          <button onClick={() => setShowCloseSession(true)} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-800 hover:bg-amber-100">
-            🔒 Cerrar Caja
-          </button>
+              <button onClick={() => setShowCloseSession(true)} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-800 hover:bg-amber-100">
+                🔒 Cerrar Caja
+              </button>
+            </>
+          )}
           {user?.role === 'ADMIN' && (
             <button onClick={() => router.push('/admin')} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm hover:bg-slate-50">Admin</button>
           )}
           <button onClick={logout} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-50">Salir</button>
         </div>
       </header>
+
+      {/* Cola de pedidos pendientes — solo caja central en modo BILLER_CASHIER */}
+      {isCashierStation && (
+        <PendingOrdersPanel
+          tenantId={tenantId}
+          activeOrderId={activeOrder?.id ?? null}
+          onSelect={loadOrderIntoCart}
+          onClearActive={clearActiveOrder}
+        />
+      )}
 
       <div className="flex min-h-0 flex-1">
         {/* LEFT — Product workspace */}
@@ -806,8 +958,21 @@ export default function POSPage() {
         {/* RIGHT — Cart sidebar */}
         <div className="flex w-[420px] shrink-0 flex-col bg-white shadow-xl">
           <div className="border-b border-slate-200 px-4 py-3">
-            <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700">Carrito de Venta</h2>
+            <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700">
+              {isBiller ? 'Pedido para Caja' : 'Carrito de Venta'}
+            </h2>
             <p className="text-xs text-slate-400">{cart.length} artículo(s)</p>
+            {activeOrder && (
+              <div className="mt-2 flex items-center justify-between rounded-lg bg-indigo-600 px-3 py-1.5 text-white">
+                <span className="text-sm font-bold">
+                  Cobrando pedido #{String(activeOrder.dailyCode).padStart(3, '0')}
+                  {activeOrder.clientName ? ` · ${activeOrder.clientName}` : ''}
+                </span>
+                <button onClick={clearActiveOrder} className="text-xs font-semibold text-indigo-200 hover:text-white">
+                  ✕ Soltar
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Fiscal options */}
@@ -918,29 +1083,48 @@ export default function POSPage() {
               </div>
             </div>
 
-            <div className="mb-3 grid grid-cols-3 gap-2">
-              {([
-                ['CASH', 'F8', 'Efectivo'],
-                ['CARD', 'F9', 'Tarjeta'],
-                ['TRANSFER', 'F10', 'Transfer.'],
-              ] as const).map(([method, key, label]) => (
-                <button key={method}
-                  onClick={() => { setPaymentMethod(method); setShowCheckout(true); }}
-                  className={`rounded-lg border py-2 text-xs font-semibold transition-colors ${
-                    paymentMethod === method ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
-                  }`}>
-                  <span className="block font-bold">{key}</span>{label}
+            {isBiller ? (
+              <>
+                {!isOnline && (
+                  <p className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs font-semibold text-amber-800">
+                    ⚠️ Sin conexión — el modo facturador requiere internet para enviar pedidos a caja
+                  </p>
+                )}
+                <button
+                  onClick={() => setShowSendToCashier(true)}
+                  disabled={cart.length === 0 || !isOnline}
+                  className="w-full rounded-xl bg-indigo-600 py-4 text-base font-bold text-white shadow-lg transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  F12 — ENVIAR A CAJA
                 </button>
-              ))}
-            </div>
+              </>
+            ) : (
+              <>
+                <div className="mb-3 grid grid-cols-3 gap-2">
+                  {([
+                    ['CASH', 'F8', 'Efectivo'],
+                    ['CARD', 'F9', 'Tarjeta'],
+                    ['TRANSFER', 'F10', 'Transfer.'],
+                  ] as const).map(([method, key, label]) => (
+                    <button key={method}
+                      onClick={() => { setPaymentMethod(method); setShowCheckout(true); }}
+                      className={`rounded-lg border py-2 text-xs font-semibold transition-colors ${
+                        paymentMethod === method ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
+                      }`}>
+                      <span className="block font-bold">{key}</span>{label}
+                    </button>
+                  ))}
+                </div>
 
-            <button
-              onClick={() => setShowCheckout(true)}
-              disabled={cart.length === 0}
-              className="w-full rounded-xl bg-emerald-600 py-4 text-base font-bold text-white shadow-lg transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-slate-300"
-            >
-              F12 — FINALIZAR VENTA
-            </button>
+                <button
+                  onClick={() => setShowCheckout(true)}
+                  disabled={cart.length === 0}
+                  className="w-full rounded-xl bg-emerald-600 py-4 text-base font-bold text-white shadow-lg transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  F12 — {activeOrder ? `COBRAR PEDIDO #${String(activeOrder.dailyCode).padStart(3, '0')}` : 'FINALIZAR VENTA'}
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>

@@ -33,8 +33,12 @@ interface UpdateTenantInput {
   phone?: string;
   address?: string;
   plan?: string;
+  planCode?: string;
+  workflowMode?: string;
   expiresAt?: Date;
 }
+
+const VALID_WORKFLOW_MODES = ['DIRECT', 'BILLER_CASHIER'];
 
 interface RenewTenantInput {
   option: 'MONTH_1' | 'MONTH_6' | 'YEAR_1' | 'INDEFINITE';
@@ -207,6 +211,12 @@ export class SuperadminService {
       data.rnc = cleanRnc;
     }
 
+    if (data.workflowMode && !VALID_WORKFLOW_MODES.includes(data.workflowMode)) {
+      throw new BadRequestException(
+        `workflowMode must be one of: ${VALID_WORKFLOW_MODES.join(', ')}`,
+      );
+    }
+
     return this.prisma.tenant.update({
       where: { id: tenantId },
       data: {
@@ -215,6 +225,8 @@ export class SuperadminService {
         phone: data.phone,
         address: data.address,
         plan: data.plan,
+        planCode: data.planCode,
+        workflowMode: data.workflowMode,
         expiresAt: data.expiresAt,
       },
     });
@@ -276,5 +288,147 @@ export class SuperadminService {
     });
 
     return { success: true, message: 'Tenant deleted successfully' };
+  }
+
+  // ───────────────────── Métricas de ventas por tenant ─────────────────────
+
+  async tenantMetrics(tenantId: string, range: 'today' | '7d' | '30d' = '30d') {
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant) throw new NotFoundException('Tenant not found');
+
+    const now = new Date();
+    const from = new Date(now);
+    if (range === 'today') from.setHours(0, 0, 0, 0);
+    else if (range === '7d') from.setDate(from.getDate() - 7);
+    else from.setDate(from.getDate() - 30);
+
+    const [agg, byDayRaw] = await Promise.all([
+      this.prisma.sale.aggregate({
+        where: { tenantId, status: 'COMPLETED', createdAt: { gte: from } },
+        _sum: { total: true, itbis: true },
+        _count: true,
+      }),
+      this.prisma.$queryRaw<{ day: Date; count: bigint; revenue: number }[]>`
+        SELECT date_trunc('day', "createdAt") AS day,
+               count(*) AS count,
+               COALESCE(sum(total), 0) AS revenue
+        FROM "Sale"
+        WHERE "tenantId" = ${tenantId} AND status = 'COMPLETED' AND "createdAt" >= ${from}
+        GROUP BY 1 ORDER BY 1`,
+    ]);
+
+    return {
+      range,
+      salesCount: agg._count,
+      revenue: agg._sum.total ?? 0,
+      itbis: agg._sum.itbis ?? 0,
+      byDay: byDayRaw.map((r) => ({
+        day: r.day.toISOString().slice(0, 10),
+        count: Number(r.count),
+        revenue: parseFloat(Number(r.revenue).toFixed(2)),
+      })),
+    };
+  }
+
+  /** Aggregate revenue of the last 30 days across all tenants (one query). */
+  async revenueByTenant() {
+    const from = new Date();
+    from.setDate(from.getDate() - 30);
+
+    const grouped = await this.prisma.sale.groupBy({
+      by: ['tenantId'],
+      where: { status: 'COMPLETED', createdAt: { gte: from } },
+      _sum: { total: true },
+      _count: true,
+    });
+    const tenants = await this.prisma.tenant.findMany({
+      select: { id: true, name: true },
+    });
+    const nameById = new Map(tenants.map((t) => [t.id, t.name]));
+
+    return grouped
+      .map((g) => ({
+        tenantId: g.tenantId,
+        tenantName: nameById.get(g.tenantId) ?? '(eliminado)',
+        salesCount: g._count,
+        revenue: parseFloat((g._sum.total ?? 0).toFixed(2)),
+      }))
+      .sort((a, b) => b.revenue - a.revenue);
+  }
+
+  // ───────────────────── Secuencias NCF por tenant ─────────────────────
+
+  async listNcfSequences(tenantId: string) {
+    return this.prisma.nCFSequence.findMany({
+      where: { tenantId },
+      orderBy: { type: 'asc' },
+    });
+  }
+
+  async upsertNcfSequence(
+    tenantId: string,
+    data: { type: NcfType; prefix: string; nextValue: number },
+  ) {
+    if (!data.prefix?.trim()) throw new BadRequestException('prefix requerido');
+    if (!Number.isInteger(data.nextValue) || data.nextValue < 1) {
+      throw new BadRequestException('nextValue debe ser un entero >= 1');
+    }
+    return this.prisma.nCFSequence.upsert({
+      where: { tenantId_type: { tenantId, type: data.type } },
+      create: { tenantId, type: data.type, prefix: data.prefix.trim(), nextValue: data.nextValue },
+      update: { prefix: data.prefix.trim(), nextValue: data.nextValue },
+    });
+  }
+
+  async deleteNcfSequence(tenantId: string, type: NcfType) {
+    await this.prisma.nCFSequence.deleteMany({ where: { tenantId, type } });
+    return { success: true };
+  }
+
+  // ───────────────────── Planes ─────────────────────
+
+  async listPlans() {
+    return this.prisma.plan.findMany({
+      orderBy: { monthlyPrice: 'asc' },
+      include: { _count: { select: { tenants: true } } },
+    });
+  }
+
+  async upsertPlan(data: {
+    code: string;
+    name: string;
+    monthlyPrice?: number;
+    maxUsers?: number;
+    maxProducts?: number;
+  }) {
+    if (!data.code?.trim() || !data.name?.trim()) {
+      throw new BadRequestException('code y name son requeridos');
+    }
+    const code = data.code.trim().toUpperCase();
+    return this.prisma.plan.upsert({
+      where: { code },
+      create: {
+        code,
+        name: data.name.trim(),
+        monthlyPrice: data.monthlyPrice ?? 0,
+        maxUsers: data.maxUsers ?? 5,
+        maxProducts: data.maxProducts ?? 1000,
+      },
+      update: {
+        name: data.name.trim(),
+        monthlyPrice: data.monthlyPrice,
+        maxUsers: data.maxUsers,
+        maxProducts: data.maxProducts,
+      },
+    });
+  }
+
+  async deletePlan(code: string) {
+    const inUse = await this.prisma.tenant.count({ where: { planCode: code } });
+    if (inUse > 0) {
+      throw new ConflictException(`Hay ${inUse} tenant(s) usando este plan`);
+    }
+    await this.prisma.plan.delete({ where: { code } });
+    return { success: true };
   }
 }

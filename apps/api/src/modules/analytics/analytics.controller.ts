@@ -1,18 +1,21 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
+import { Roles } from '../../common/auth.guard';
+import { TenantId } from '../../common/tenant.decorator';
 
+@Roles('ADMIN', 'ACCOUNTANT', 'SUPER_ADMIN')
 @Controller('analytics')
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
 
   @Get('dashboard')
-  async getDashboard(@Query('tenantId') tenantId: string) {
+  async getDashboard(@TenantId() tenantId: string) {
     return this.analyticsService.getDashboard(tenantId);
   }
 
   @Get('top-products')
   async getTopProducts(
-    @Query('tenantId') tenantId: string,
+    @TenantId() tenantId: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
@@ -20,18 +23,18 @@ export class AnalyticsController {
   }
 
   @Get('peak-hours')
-  async getPeakHours(@Query('tenantId') tenantId: string) {
+  async getPeakHours(@TenantId() tenantId: string) {
     return this.analyticsService.getPeakSalesHours(tenantId);
   }
 
   @Get('purchase-list')
-  async getSmartPurchaseList(@Query('tenantId') tenantId: string) {
+  async getSmartPurchaseList(@TenantId() tenantId: string) {
     return this.analyticsService.getSmartPurchaseList(tenantId);
   }
 
   @Get('low-stock')
   async getLowStock(
-    @Query('tenantId') tenantId: string,
+    @TenantId() tenantId: string,
     @Query('threshold') threshold?: string,
   ) {
     return this.analyticsService.getLowStockAlerts(tenantId, threshold ? parseInt(threshold) : 10);

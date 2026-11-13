@@ -1,5 +1,7 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param } from '@nestjs/common';
 import { CategoriesService } from './categories.service';
+import { Roles } from '../../common/auth.guard';
+import { TenantId } from '../../common/tenant.decorator';
 
 class CreateCategoryDto {
   name: string;
@@ -16,22 +18,25 @@ export class CategoriesController {
   constructor(private readonly categoriesService: CategoriesService) {}
 
   @Get()
-  list(@Query('tenantId') tenantId: string) {
+  list(@TenantId() tenantId: string) {
     return this.categoriesService.list(tenantId);
   }
 
+  @Roles('ADMIN', 'SUPER_ADMIN')
   @Post()
-  create(@Query('tenantId') tenantId: string, @Body() body: CreateCategoryDto) {
+  create(@TenantId() tenantId: string, @Body() body: CreateCategoryDto) {
     return this.categoriesService.create(tenantId, body);
   }
 
+  @Roles('ADMIN', 'SUPER_ADMIN')
   @Put(':id')
-  update(@Query('tenantId') tenantId: string, @Param('id') id: string, @Body() body: UpdateCategoryDto) {
+  update(@TenantId() tenantId: string, @Param('id') id: string, @Body() body: UpdateCategoryDto) {
     return this.categoriesService.update(tenantId, id, body);
   }
 
+  @Roles('ADMIN', 'SUPER_ADMIN')
   @Delete(':id')
-  remove(@Query('tenantId') tenantId: string, @Param('id') id: string) {
+  remove(@TenantId() tenantId: string, @Param('id') id: string) {
     return this.categoriesService.remove(tenantId, id);
   }
 }

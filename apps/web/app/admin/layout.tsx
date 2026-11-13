@@ -24,7 +24,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       router.replace('/login?redirect=/admin');
       return;
     }
-    if (user.role === 'CASHIER') {
+    if (user.role === 'CASHIER' || user.role === 'BILLER') {
       router.replace('/pos');
     }
   }, [user, loading, router]);
@@ -37,7 +37,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     );
   }
 
-  if (user.role === 'CASHIER') {
+  if (user.role === 'CASHIER' || user.role === 'BILLER') {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 font-sans text-slate-500">
         Redirigiendo al POS…

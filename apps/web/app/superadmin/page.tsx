@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../lib/auth-context';
 import { superadminFetch } from '../../lib/api';
+import { TenantDetailDrawer } from '../../components/superadmin/TenantDetailDrawer';
+import { PlansModal, AuditModal } from '../../components/superadmin/PlansModal';
 
 interface Metrics {
   totalTenants: number;
@@ -53,6 +55,9 @@ export default function SuperadminPage() {
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [renewOption, setRenewOption] = useState<RenewOption>('MONTH_1');
   const [customExpiryDate, setCustomExpiryDate] = useState('');
+  const [detailTenant, setDetailTenant] = useState<TenantRow | null>(null);
+  const [showPlans, setShowPlans] = useState(false);
+  const [showAudit, setShowAudit] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -269,6 +274,12 @@ export default function SuperadminPage() {
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-bold">Todos los Comercios</h2>
           <div className="flex gap-2">
+            <button onClick={() => setShowAudit(true)} className="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">
+              📜 Auditoría
+            </button>
+            <button onClick={() => setShowPlans(true)} className="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">
+              💼 Planes
+            </button>
             <button onClick={load} disabled={loading} className="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800 disabled:opacity-50">
               {loading ? 'Cargando…' : '↻ Actualizar'}
             </button>
@@ -325,6 +336,12 @@ export default function SuperadminPage() {
                         </button>
                         {openDropdown === t.id && (
                           <div className="absolute right-0 z-[100] mt-1 w-56 rounded-lg border border-slate-700 bg-slate-900 shadow-2xl">
+                            <button
+                              onClick={() => { setDetailTenant(t); setOpenDropdown(null); }}
+                              className="w-full px-4 py-2.5 text-left text-sm font-medium text-cyan-400 hover:bg-slate-800"
+                            >
+                              📋 Detalles & Config
+                            </button>
                             <button
                               onClick={() => handleImpersonate(t)}
                               disabled={actionId === t.id}
@@ -584,6 +601,16 @@ export default function SuperadminPage() {
           </div>
         </div>
       )}
+
+      {detailTenant && (
+        <TenantDetailDrawer
+          tenant={detailTenant}
+          onClose={() => setDetailTenant(null)}
+          onChanged={load}
+        />
+      )}
+      {showPlans && <PlansModal onClose={() => setShowPlans(false)} />}
+      {showAudit && <AuditModal onClose={() => setShowAudit(false)} />}
     </div>
   );
 }

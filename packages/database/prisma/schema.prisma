@@ -17,7 +17,13 @@ model Tenant {
   address        String?
   isActive       Boolean  @default(true)
   plan           String   @default("BASIC")
+  planCode       String?
+  planRef        Plan?    @relation(fields: [planCode], references: [code])
   expiresAt      DateTime
+  // "DIRECT" = POS clásico (cobra quien factura) | "BILLER_CASHIER" = facturadores + caja central
+  workflowMode   String   @default("DIRECT")
+  // Atomic per-tenant invoice counter (replaces count()+1)
+  invoiceCounter Int      @default(0)
   // Thermal receipt configuration
   receiptLogoUrl String?
   commercialName String?
@@ -26,14 +32,21 @@ model Tenant {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  users          User[]
-  categories     Category[]
-  products       Product[]
-  sales          Sale[]
-  ncfSequences   NCFSequence[]
-  cashDrawerLogs CashDrawerLog[]
-  cashSessions   CashSession[]
-  cashMovements  CashMovement[]
+  users             User[]
+  categories        Category[]
+  products          Product[]
+  sales             Sale[]
+  ncfSequences      NCFSequence[]
+  cashDrawerLogs    CashDrawerLog[]
+  cashSessions      CashSession[]
+  cashMovements     CashMovement[]
+  orders            Order[]
+  orderCounters     OrderDailyCounter[]
+  ecfConfig         TenantEcfConfig?
+  ecfSubmissions    EcfSubmission[]
+  purchases         Purchase[]
+  reconciliations   CashReconciliation[]
+  accountingPeriods AccountingPeriod[]
 }
 
 model User {
@@ -47,7 +60,8 @@ model User {
   tenant    Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
 
-  cashSessions CashSession[]
+  cashSessions  CashSession[]
+  createdOrders Order[]       @relation("OrderCreator")
 
   @@unique([tenantId, username])
 }
@@ -56,6 +70,8 @@ enum Role {
   SUPER_ADMIN
   ADMIN
   CASHIER
+  BILLER
+  ACCOUNTANT
 }
 
 model Category {
@@ -96,6 +112,7 @@ model Product {
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
   saleItems     SaleItem[]
+  orderItems    OrderItem[]
 
   @@unique([barcode, tenantId])
   @@unique([sku, tenantId])
@@ -121,54 +138,62 @@ model NCFSequence {
 }
 
 model Sale {
-  id            String        @id @default(uuid())
+  id            String         @id @default(uuid())
   invoiceNumber String?
   // Client-generated UUID for sales made while offline. Used by /sales/sync
   // to guarantee idempotency (never double-charge/double-deduct stock) when
   // the POS re-submits its pending offline queue.
-  offlineId     String?       @unique
+  offlineId     String?        @unique
   total         Float
-  subtotal      Float         @default(0)
+  subtotal      Float          @default(0)
   cashReceived  Float?
   changeDue     Float?
-  totalReceived Float         @default(0)
-  totalChange   Float         @default(0)
+  totalReceived Float          @default(0)
+  totalChange   Float          @default(0)
   ncf           String?
-  ncfType       NcfType       @default(VENTA_RAPIDA)
+  ncfType       NcfType        @default(VENTA_RAPIDA)
   clientRnc     String?
   clientName    String?
-  itbis         Float         @default(0)
-  applyItbis    Boolean       @default(false)
-  paymentMethod PaymentMethod @default(CASH)
-  status        String        @default("COMPLETED")
+  itbis         Float          @default(0)
+  applyItbis    Boolean        @default(false)
+  paymentMethod PaymentMethod  @default(CASH)
+  status        String         @default("COMPLETED")
   voidedAt      DateTime?
   voidReason    String?
   tenantId      String
-  tenant        Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   cashSessionId String?
-  cashSession   CashSession?  @relation(fields: [cashSessionId], references: [id])
-  createdAt     DateTime      @default(now())
+  cashSession   CashSession?   @relation(fields: [cashSessionId], references: [id])
+  // e-CF (facturación electrónica) tracking — null when tenant has e-CF disabled
+  ecfStatus     String?
+  ecfTrackId    String?
+  createdAt     DateTime       @default(now())
   items         SaleItem[]
+  order         Order?
+  ecfSubmission EcfSubmission?
 
   @@unique([invoiceNumber, tenantId])
+  @@unique([tenantId, ncf])
   @@index([tenantId, status])
+  @@index([tenantId, createdAt])
 }
 
 model CashSession {
-  id                     String         @id @default(uuid())
+  id                     String              @id @default(uuid())
   tenantId               String
-  tenant                 Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant                 Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   userId                 String
-  user                   User           @relation(fields: [userId], references: [id])
-  openedAt               DateTime       @default(now())
+  user                   User                @relation(fields: [userId], references: [id])
+  openedAt               DateTime            @default(now())
   closedAt               DateTime?
   openingBalance         Float
   expectedClosingBalance Float?
   actualClosingBalance   Float?
-  status                 String         @default("OPEN")
-  createdAt              DateTime       @default(now())
+  status                 String              @default("OPEN")
+  createdAt              DateTime            @default(now())
   sales                  Sale[]
   movements              CashMovement[]
+  reconciliation         CashReconciliation?
 
   @@index([tenantId, userId, status])
 }
@@ -225,4 +250,195 @@ enum PaymentMethod {
   CASH
   CARD
   TRANSFER
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Flujo Facturador/Caja: pedidos creados por facturadores y cobrados en caja
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum OrderStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+  EXPIRED
+}
+
+model Order {
+  id            String      @id @default(uuid())
+  tenantId      String
+  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  // Short daily code the biller tells the client ("#042"); resets per business day
+  dailyCode     Int
+  businessDate  DateTime    @db.Date
+  status        OrderStatus @default(PENDING)
+  creatorUserId String
+  creator       User        @relation("OrderCreator", fields: [creatorUserId], references: [id])
+  clientName    String?
+  clientRnc     String?
+  ncfType       NcfType     @default(VENTA_RAPIDA)
+  notes         String?
+  // Informational snapshot at billing time; cashier checkout recomputes from items
+  subtotal      Float       @default(0)
+  saleId        String?     @unique
+  sale          Sale?       @relation(fields: [saleId], references: [id])
+  completedById String?
+  cancelReason  String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  items         OrderItem[]
+
+  @@unique([tenantId, businessDate, dailyCode])
+  @@index([tenantId, status, createdAt])
+}
+
+model OrderItem {
+  id        String  @id @default(uuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  quantity  Float
+  unitPrice Float
+  isLoose   Boolean @default(false)
+}
+
+// Atomic per-tenant/per-day counter for Order.dailyCode
+model OrderDailyCounter {
+  tenantId     String
+  businessDate DateTime @db.Date
+  nextValue    Int      @default(1)
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@id([tenantId, businessDate])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Facturación electrónica e-CF (Pronesoft)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model TenantEcfConfig {
+  tenantId        String   @id
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  enabled         Boolean  @default(false)
+  environment     String   @default("sandbox") // "sandbox" | "prod"
+  clientId        String
+  // AES-256-GCM encrypted with ECF_SECRET_KEY env var
+  clientSecretEnc String
+  updatedAt       DateTime @updatedAt
+}
+
+model EcfSubmission {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  saleId      String   @unique
+  sale        Sale     @relation(fields: [saleId], references: [id])
+  status      String   @default("QUEUED") // QUEUED | PROCESSING | SENT | FAILED
+  attempts    Int      @default(0)
+  nextRetryAt DateTime @default(now())
+  trackId     String?
+  lastError   String?
+  payload     Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status, nextRetryAt])
+  @@index([tenantId, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Planes de la plataforma (SuperAdmin)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Plan {
+  code         String   @id // "BASIC", "PREMIUM", "ENTERPRISE"
+  name         String
+  monthlyPrice Float    @default(0)
+  maxUsers     Int      @default(5)
+  maxProducts  Int      @default(1000)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  tenants      Tenant[]
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  actorUserId    String
+  actorUsername  String
+  action         String // "TENANT_SUSPEND", "IMPERSONATE", "PERIOD_APPROVE", ...
+  targetTenantId String?
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([targetTenantId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Contabilidad RD: conciliaciones, compras (606) y cierres mensuales
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Compras y gastos con NCF de proveedor — alimenta el Formato 606 de DGII
+model Purchase {
+  id              String        @id @default(uuid())
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supplierRnc     String
+  supplierName    String
+  ncf             String
+  ncfType         String        @default("B01")
+  // Código de clasificación de gasto DGII 01-11 (606)
+  expenseCategory String
+  date            DateTime
+  subtotal        Float
+  itbis           Float         @default(0)
+  itbisRetenido   Float         @default(0)
+  isrRetenido     Float         @default(0)
+  total           Float
+  paymentMethod   PaymentMethod @default(CASH)
+  notes           String?
+  createdById     String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([tenantId, date])
+}
+
+// Conciliación de caja: creada automáticamente al cerrar cada CashSession
+model CashReconciliation {
+  id            String      @id @default(uuid())
+  tenantId      String
+  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  cashSessionId String      @unique
+  cashSession   CashSession @relation(fields: [cashSessionId], references: [id])
+  expectedCash  Float
+  countedCash   Float
+  difference    Float
+  status        String      @default("PENDING_REVIEW") // PENDING_REVIEW | APPROVED | OBSERVED
+  reviewedById  String?
+  reviewNotes   String?
+  reviewedAt    DateTime?
+  createdAt     DateTime    @default(now())
+
+  @@index([tenantId, status, createdAt])
+}
+
+// Cierre contable mensual con flujo verificar → aprobar → presentar en DGII
+model AccountingPeriod {
+  id           String    @id @default(uuid())
+  tenantId     String
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  year         Int
+  month        Int
+  status       String    @default("OPEN") // OPEN | CLOSED | APPROVED
+  // Frozen totals at close: ventas, ITBIS cobrado, compras, ITBIS pagado, anulaciones, diferencias de caja
+  snapshot     Json?
+  closedById   String?
+  closedAt     DateTime?
+  approvedById String?
+  approvedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([tenantId, year, month])
 }

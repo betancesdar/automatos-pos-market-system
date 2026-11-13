@@ -63,6 +63,34 @@ export function lineTotal(item: CartLine): number {
   return parseFloat((item.unitPrice * item.quantity).toFixed(2));
 }
 
+// ── Flujo Facturador/Caja ────────────────────────────────────────────────────
+
+export type WorkflowMode = 'DIRECT' | 'BILLER_CASHIER';
+
+export interface PendingOrderItem {
+  id: string;
+  productId: string;
+  quantity: number;
+  unitPrice: number;
+  isLoose: boolean;
+  product?: { name: string; stock: number };
+}
+
+export interface PendingOrder {
+  id: string;
+  dailyCode: number;
+  businessDate: string;
+  status: 'PENDING' | 'COMPLETED' | 'CANCELLED' | 'EXPIRED';
+  clientName: string | null;
+  clientRnc: string | null;
+  ncfType: ReceiptTypeValue | string;
+  notes: string | null;
+  subtotal: number;
+  createdAt: string;
+  creator?: { id: string; name: string; username: string };
+  items: PendingOrderItem[];
+}
+
 export function productEmoji(slug?: string | null): string {
   switch (slug) {
     case 'BEBIDAS': return '🥤';

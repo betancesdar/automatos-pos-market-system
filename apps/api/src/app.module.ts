@@ -1,5 +1,6 @@
 import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
@@ -13,11 +14,16 @@ import { UsersModule } from './modules/users/users.module';
 import { SuperadminModule } from './modules/superadmin/superadmin.module';
 import { CashSessionModule } from './modules/cash-session/cash-session.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { OrdersModule } from './modules/orders/orders.module';
+import { EcfModule } from './modules/ecf/ecf.module';
+import { AccountingModule } from './modules/accounting/accounting.module';
+import { AuditModule } from './common/audit.module';
 import { TenantLicenseMiddleware } from './common/tenant-license.middleware';
-import { JwtAuthGuard } from './common/auth.guard';
+import { JwtAuthGuard, RolesGuard } from './common/auth.guard';
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     PrismaModule,
     CatalogModule,
     CategoriesModule,
@@ -29,12 +35,17 @@ import { JwtAuthGuard } from './common/auth.guard';
     SuperadminModule,
     CashSessionModule,
     ReportsModule,
+    OrdersModule,
+    EcfModule,
+    AccountingModule,
+    AuditModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
     TenantLicenseMiddleware,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: RolesGuard },
   ],
 })
 export class AppModule implements NestModule {

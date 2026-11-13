@@ -2,19 +2,21 @@ import { Controller, Get, Param, Query, Post, Put, Delete, Body } from '@nestjs/
 import { CatalogService } from './catalog.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { Roles } from '../../common/auth.guard';
+import { TenantId } from '../../common/tenant.decorator';
 
 @Controller('catalog')
 export class CatalogController {
   constructor(private readonly catalogService: CatalogService) {}
 
   @Get('categories')
-  listCategories(@Query('tenantId') tenantId: string) {
+  listCategories(@TenantId() tenantId: string) {
     return this.catalogService.listCategories(tenantId);
   }
 
   @Get('products')
   listProducts(
-    @Query('tenantId') tenantId: string,
+    @TenantId() tenantId: string,
     @Query('category') category?: string,
     @Query('search') search?: string,
     @Query('categoryId') categoryId?: string,
@@ -23,27 +25,30 @@ export class CatalogController {
   }
 
   @Get('scan/:barcode')
-  scanProduct(@Param('barcode') barcode: string, @Query('tenantId') tenantId: string) {
-    if (!tenantId) return { error: 'tenantId is required' };
+  scanProduct(@Param('barcode') barcode: string, @TenantId() tenantId: string) {
     return this.catalogService.getProductByBarcode(tenantId, barcode);
   }
 
+  // CASHIER/BILLER included: the POS QuickAdd modal creates products on unknown barcodes.
+  @Roles('ADMIN', 'CASHIER', 'BILLER', 'SUPER_ADMIN')
   @Post('product')
-  addProduct(@Query('tenantId') tenantId: string, @Body() body: CreateProductDto) {
+  addProduct(@TenantId() tenantId: string, @Body() body: CreateProductDto) {
     return this.catalogService.addProduct(tenantId, body);
   }
 
+  @Roles('ADMIN', 'SUPER_ADMIN')
   @Put('product/:id')
   updateProduct(
-    @Query('tenantId') tenantId: string,
+    @TenantId() tenantId: string,
     @Param('id') id: string,
     @Body() body: UpdateProductDto,
   ) {
     return this.catalogService.updateProduct(tenantId, id, body);
   }
 
+  @Roles('ADMIN', 'SUPER_ADMIN')
   @Delete('product/:id')
-  deleteProduct(@Query('tenantId') tenantId: string, @Param('id') id: string) {
+  deleteProduct(@TenantId() tenantId: string, @Param('id') id: string) {
     return this.catalogService.deleteProduct(tenantId, id);
   }
 }

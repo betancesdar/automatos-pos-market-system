@@ -10,7 +10,7 @@ export interface AuthUser {
   name: string;
   username: string;
   email: string | null;
-  role: 'SUPER_ADMIN' | 'ADMIN' | 'CASHIER';
+  role: 'SUPER_ADMIN' | 'ADMIN' | 'CASHIER' | 'BILLER' | 'ACCOUNTANT';
   tenantId: string | null;
 }
 

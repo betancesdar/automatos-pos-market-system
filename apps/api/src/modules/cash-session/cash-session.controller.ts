@@ -1,7 +1,8 @@
 import { Controller, Get, Post, Body, Param, Query, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { CashSessionService } from './cash-session.service';
-import { JwtAuthGuard } from '../../common/auth.guard';
+import { JwtAuthGuard, Roles } from '../../common/auth.guard';
+import { TenantId } from '../../common/tenant.decorator';
 import type { TokenPayload } from '../../common/jwt.util';
 
 class OpenCashSessionDto {
@@ -20,51 +21,55 @@ class CashMovementDto {
 }
 
 @UseGuards(JwtAuthGuard)
+@Roles('CASHIER', 'ADMIN', 'ACCOUNTANT', 'SUPER_ADMIN')
 @Controller('cash-sessions')
 export class CashSessionController {
   constructor(private readonly cashSessionService: CashSessionService) {}
 
   @Get('current')
-  getCurrent(@Query('tenantId') tenantId: string, @Req() req: Request & { user: TokenPayload }) {
+  getCurrent(@TenantId() tenantId: string, @Req() req: Request & { user: TokenPayload }) {
     return this.cashSessionService.getCurrent(tenantId, req.user.sub);
   }
 
   @Get('live')
-  getLive(@Query('tenantId') tenantId: string) {
+  getLive(@TenantId() tenantId: string) {
     return this.cashSessionService.getLiveShift(tenantId);
   }
 
   @Get('shifts/summary')
   getShiftSummary(
-    @Query('tenantId') tenantId: string,
+    @TenantId() tenantId: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
     return this.cashSessionService.getShiftSummary(tenantId, from, to);
   }
 
+  @Roles('CASHIER', 'ADMIN', 'SUPER_ADMIN')
   @Post('movements')
-  addMovement(@Query('tenantId') tenantId: string, @Body() body: CashMovementDto) {
+  addMovement(@TenantId() tenantId: string, @Body() body: CashMovementDto) {
     return this.cashSessionService.addMovement(tenantId, body);
   }
 
   @Get()
-  list(@Query('tenantId') tenantId: string, @Query('limit') limit?: string) {
+  list(@TenantId() tenantId: string, @Query('limit') limit?: string) {
     return this.cashSessionService.list(tenantId, limit ? parseInt(limit, 10) : undefined);
   }
 
+  @Roles('CASHIER', 'ADMIN', 'SUPER_ADMIN')
   @Post('open')
   open(
-    @Query('tenantId') tenantId: string,
+    @TenantId() tenantId: string,
     @Body() body: OpenCashSessionDto,
     @Req() req: Request & { user: TokenPayload },
   ) {
     return this.cashSessionService.open(tenantId, req.user.sub, body.openingBalance);
   }
 
+  @Roles('CASHIER', 'ADMIN', 'SUPER_ADMIN')
   @Post(':id/close')
   close(
-    @Query('tenantId') tenantId: string,
+    @TenantId() tenantId: string,
     @Param('id') id: string,
     @Body() body: CloseCashSessionDto,
     @Req() req: Request & { user: TokenPayload },

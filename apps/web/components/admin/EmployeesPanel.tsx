@@ -8,11 +8,11 @@ interface Employee {
   name: string;
   username: string;
   email: string | null;
-  role: 'ADMIN' | 'CASHIER';
+  role: 'ADMIN' | 'CASHIER' | 'BILLER' | 'ACCOUNTANT';
   createdAt: string;
 }
 
-const emptyForm: { name: string; username: string; email: string; password: string; role: 'ADMIN' | 'CASHIER' } = {
+const emptyForm: { name: string; username: string; email: string; password: string; role: 'ADMIN' | 'CASHIER' | 'BILLER' | 'ACCOUNTANT' } = {
   name: '', username: '', email: '', password: '', role: 'CASHIER',
 };
 
@@ -162,11 +162,13 @@ export function EmployeesPanel({ tenantId }: { tenantId: string }) {
               <label className="mb-1 block text-sm font-medium text-slate-700">Rol</label>
               <select
                 value={form.role}
-                onChange={(e) => setForm({ ...form, role: e.target.value as 'ADMIN' | 'CASHIER' })}
+                onChange={(e) => setForm({ ...form, role: e.target.value as 'ADMIN' | 'CASHIER' | 'BILLER' | 'ACCOUNTANT' })}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2"
               >
                 <option value="ADMIN">ADMIN — Acceso completo</option>
-                <option value="CASHIER">CASHIER — Solo POS</option>
+                <option value="CASHIER">CASHIER — Caja / POS</option>
+                <option value="BILLER">FACTURADOR — Arma pedidos, no cobra</option>
+                <option value="ACCOUNTANT">CONTABLE — Contabilidad y reportes</option>
               </select>
             </div>
             <div className="flex gap-2 md:col-span-2">

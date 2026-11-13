@@ -1,36 +1,98 @@
 import { Controller, Post, Get, Body, Query, Param, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
+import { Type } from 'class-transformer';
+import {
+  ArrayNotEmpty,
+  IsArray,
+  IsBoolean,
+  IsEnum,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Min,
+  MinLength,
+  ValidateNested,
+} from 'class-validator';
 import { SalesService } from './sales.service';
 import { NcfType, PaymentMethod } from '@prisma/client';
-import { JwtAuthGuard } from '../../common/auth.guard';
+import { JwtAuthGuard, Roles } from '../../common/auth.guard';
+import { TenantId } from '../../common/tenant.decorator';
 import type { TokenPayload } from '../../common/jwt.util';
 
+export class CheckoutItemDto {
+  @IsString()
+  productId: string;
+
+  @IsNumber()
+  @Min(0.001)
+  quantity: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  unitPrice?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  isLoose?: boolean;
+}
+
 export class CheckoutDto {
-  items: {
-    productId: string;
-    quantity: number;
-    unitPrice?: number;
-    isLoose?: boolean;
-  }[];
+  @IsArray()
+  @ArrayNotEmpty()
+  @ValidateNested({ each: true })
+  @Type(() => CheckoutItemDto)
+  items: CheckoutItemDto[];
+
+  @IsNumber()
+  @Min(0)
   cashReceived: number;
+
+  @IsEnum(NcfType)
   ncfType: NcfType;
+
+  @IsOptional()
+  @IsBoolean()
   applyItbis?: boolean;
+
+  @IsOptional()
+  @IsString()
   clientRnc?: string;
+
+  @IsOptional()
+  @IsString()
   clientName?: string;
+
+  @IsOptional()
+  @IsEnum(PaymentMethod)
   paymentMethod?: PaymentMethod;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
   discountAmount?: number;
 }
 
 export class VoidSaleDto {
+  @IsString()
+  @MinLength(1)
   voidReason: string;
 }
 
 export class OfflineSaleDto extends CheckoutDto {
+  @IsUUID()
   offlineId: string;
+
+  @IsOptional()
+  @IsString()
   offlineCreatedAt?: string;
 }
 
 export class SyncSalesDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => OfflineSaleDto)
   sales: OfflineSaleDto[];
 }
 
@@ -39,9 +101,10 @@ export class SalesController {
   constructor(private readonly salesService: SalesService) {}
 
   @UseGuards(JwtAuthGuard)
+  @Roles('CASHIER', 'ADMIN', 'SUPER_ADMIN')
   @Post('checkout')
   checkout(
-    @Query('tenantId') tenantId: string,
+    @TenantId() tenantId: string,
     @Body() data: CheckoutDto,
     @Req() req: Request & { user: TokenPayload },
   ) {
@@ -54,9 +117,10 @@ export class SalesController {
    * reported as "duplicate" and never reprocessed/double-deducted.
    */
   @UseGuards(JwtAuthGuard)
+  @Roles('CASHIER', 'ADMIN', 'SUPER_ADMIN')
   @Post('sync')
   sync(
-    @Query('tenantId') tenantId: string,
+    @TenantId() tenantId: string,
     @Body() body: SyncSalesDto,
     @Req() req: Request & { user: TokenPayload },
   ) {
@@ -65,7 +129,7 @@ export class SalesController {
 
   @Get()
   list(
-    @Query('tenantId') tenantId: string,
+    @TenantId() tenantId: string,
     @Query('search') search?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
@@ -82,14 +146,15 @@ export class SalesController {
   }
 
   @Get(':id')
-  get(@Query('tenantId') tenantId: string, @Param('id') id: string) {
+  get(@TenantId() tenantId: string, @Param('id') id: string) {
     return this.salesService.getSale(tenantId, id);
   }
 
   @UseGuards(JwtAuthGuard)
+  @Roles('ADMIN', 'SUPER_ADMIN')
   @Post(':id/void')
   void(
-    @Query('tenantId') tenantId: string,
+    @TenantId() tenantId: string,
     @Param('id') id: string,
     @Body() body: VoidSaleDto,
   ) {

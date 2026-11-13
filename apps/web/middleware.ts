@@ -11,7 +11,8 @@ function getSecret() {
 
 function homeForRole(role: string): string {
   if (role === 'SUPER_ADMIN') return '/superadmin';
-  if (role === 'CASHIER') return '/pos';
+  if (role === 'CASHIER' || role === 'BILLER') return '/pos';
+  if (role === 'ACCOUNTANT') return '/admin/accounting';
   return '/admin';
 }
 
@@ -49,9 +50,21 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL(homeForRole(role), request.url));
     }
 
-    if (pathname.startsWith('/admin') && role === 'CASHIER') {
+    if (pathname.startsWith('/admin') && (role === 'CASHIER' || role === 'BILLER')) {
       return NextResponse.redirect(new URL('/pos', request.url));
     }
+
+    // Accountants only get the accounting area within /admin.
+    if (
+      pathname.startsWith('/admin') &&
+      role === 'ACCOUNTANT' &&
+      !pathname.startsWith('/admin/accounting')
+    ) {
+      return NextResponse.redirect(new URL('/admin/accounting', request.url));
+    }
+
+    // Billers never charge, so they don't use the cashier-only POS gates —
+    // the POS page itself adapts by role.
 
     if (pathname.startsWith('/admin') && role === 'SUPER_ADMIN') {
       return NextResponse.redirect(new URL('/superadmin', request.url));

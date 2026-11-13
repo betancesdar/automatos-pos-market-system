@@ -1,13 +1,16 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { ReportsService } from './reports.service';
+import { Roles } from '../../common/auth.guard';
+import { TenantId } from '../../common/tenant.decorator';
 
+@Roles('ADMIN', 'ACCOUNTANT', 'SUPER_ADMIN')
 @Controller('reports')
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
   @Get('sales')
   getSalesReport(
-    @Query('tenantId') tenantId: string,
+    @TenantId() tenantId: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
@@ -16,7 +19,7 @@ export class ReportsController {
 
   @Get('top-products')
   getTopProducts(
-    @Query('tenantId') tenantId: string,
+    @TenantId() tenantId: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('limit') limit?: string,

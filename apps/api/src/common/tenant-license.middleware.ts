@@ -5,7 +5,11 @@ import {
 } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
-import { LICENSE_BLOCKED_MESSAGE } from '../common/jwt.util';
+import {
+  LICENSE_BLOCKED_MESSAGE,
+  COOKIE_NAMES,
+  verifyToken,
+} from '../common/jwt.util';
 
 const LICENSE_PROTECTED_PREFIXES = [
   '/catalog',
@@ -17,6 +21,9 @@ const LICENSE_PROTECTED_PREFIXES = [
   '/tenant',
   '/cash-sessions',
   '/reports',
+  '/orders',
+  '/accounting',
+  '/ecf',
 ];
 
 @Injectable()
@@ -31,7 +38,10 @@ export class TenantLicenseMiddleware implements NestMiddleware {
     );
     if (!needsCheck) return next();
 
+    // Resolve the tenant primarily from the JWT (authoritative); fall back to
+    // the legacy query/body params only when no token is present.
     const tenantId =
+      this.tenantIdFromToken(req) ||
       (req.query.tenantId as string) ||
       (req.body?.tenantId as string) ||
       undefined;
@@ -62,5 +72,22 @@ export class TenantLicenseMiddleware implements NestMiddleware {
     }
 
     next();
+  }
+
+  private tenantIdFromToken(req: Request): string | undefined {
+    try {
+      const auth = req.headers.authorization;
+      const token = auth?.startsWith('Bearer ')
+        ? auth.slice(7)
+        : (req.cookies as Record<string, string> | undefined)?.[
+            COOKIE_NAMES.accessToken
+          ];
+      if (!token) return undefined;
+      const payload = verifyToken(token);
+      // SUPER_ADMIN has no tenant; license checks don't apply to them.
+      return payload.tenantId ?? undefined;
+    } catch {
+      return undefined;
+    }
   }
 }

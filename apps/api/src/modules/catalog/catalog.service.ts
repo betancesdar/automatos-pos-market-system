@@ -134,6 +134,20 @@ export class CatalogService {
 
   async addProduct(tenantId: string, data: CreateProductDto) {
     if (!data.name?.trim()) throw new BadRequestException('Product name is required');
+
+    // Plan limit enforcement (only when the tenant has a Plan assigned).
+    const tenantPlan = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { planRef: { select: { maxProducts: true, name: true } } },
+    });
+    if (tenantPlan?.planRef) {
+      const count = await this.prisma.product.count({ where: { tenantId } });
+      if (count >= tenantPlan.planRef.maxProducts) {
+        throw new BadRequestException(
+          `Límite del plan ${tenantPlan.planRef.name} alcanzado (${tenantPlan.planRef.maxProducts} productos). Contacta al administrador para ampliar tu plan.`,
+        );
+      }
+    }
     this.validateInventoryBounds(data.quantityMin ?? 0, data.quantityMax ?? 0);
 
     const { basePrice, taxPercentage, price } = this.resolvePricing(data);

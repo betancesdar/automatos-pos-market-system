@@ -14,8 +14,9 @@ import {
 import type { Response, Request } from 'express';
 import { AuthService, UsersService } from './users.service';
 import { Role } from '@prisma/client';
-import { Public, JwtAuthGuard } from '../../common/auth.guard';
+import { Public, JwtAuthGuard, Roles } from '../../common/auth.guard';
 import { COOKIE_NAMES } from '../../common/jwt.util';
+import { TenantId } from '../../common/tenant.decorator';
 
 class LoginDto {
   identifier: string;
@@ -81,23 +82,24 @@ export class AuthController {
   }
 }
 
+@Roles('ADMIN', 'SUPER_ADMIN')
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get()
-  listUsers(@Query('tenantId') tenantId: string) {
+  listUsers(@TenantId() tenantId: string) {
     return this.usersService.listUsers(tenantId);
   }
 
   @Post()
-  createUser(@Query('tenantId') tenantId: string, @Body() body: CreateUserDto) {
+  createUser(@TenantId() tenantId: string, @Body() body: CreateUserDto) {
     return this.usersService.createUser(tenantId, body);
   }
 
   @Put(':id')
   updateUser(
-    @Query('tenantId') tenantId: string,
+    @TenantId() tenantId: string,
     @Param('id') id: string,
     @Body() body: UpdateUserDto,
   ) {
@@ -105,7 +107,7 @@ export class UsersController {
   }
 
   @Delete(':id')
-  deleteUser(@Query('tenantId') tenantId: string, @Param('id') id: string) {
+  deleteUser(@TenantId() tenantId: string, @Param('id') id: string) {
     return this.usersService.deleteUser(tenantId, id);
   }
 }

@@ -86,8 +86,23 @@ export class UsersService {
     if (!data.password || data.password.length < 4) {
       throw new BadRequestException('Password must be at least 4 characters');
     }
-    if (data.role !== Role.ADMIN && data.role !== Role.CASHIER) {
-      throw new BadRequestException('Role must be ADMIN or CASHIER');
+    const TENANT_ROLES: Role[] = [Role.ADMIN, Role.CASHIER, Role.BILLER, Role.ACCOUNTANT];
+    if (!TENANT_ROLES.includes(data.role)) {
+      throw new BadRequestException('Role must be ADMIN, CASHIER, BILLER or ACCOUNTANT');
+    }
+
+    // Plan limit enforcement (only when the tenant has a Plan assigned).
+    const tenantPlan = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { planRef: { select: { maxUsers: true, name: true } } },
+    });
+    if (tenantPlan?.planRef) {
+      const count = await this.prisma.user.count({ where: { tenantId } });
+      if (count >= tenantPlan.planRef.maxUsers) {
+        throw new BadRequestException(
+          `Límite del plan ${tenantPlan.planRef.name} alcanzado (${tenantPlan.planRef.maxUsers} usuarios). Contacta al administrador para ampliar tu plan.`,
+        );
+      }
     }
 
     const normalizedUsername = data.username.trim().toLowerCase();
@@ -132,8 +147,9 @@ export class UsersService {
       if (existing) throw new ConflictException('Username already in use');
     }
 
-    if (data.role && data.role !== Role.ADMIN && data.role !== Role.CASHIER) {
-      throw new BadRequestException('Role must be ADMIN or CASHIER');
+    const TENANT_ROLES_UPDATE: Role[] = [Role.ADMIN, Role.CASHIER, Role.BILLER, Role.ACCOUNTANT];
+    if (data.role && !TENANT_ROLES_UPDATE.includes(data.role)) {
+      throw new BadRequestException('Role must be ADMIN, CASHIER, BILLER or ACCOUNTANT');
     }
 
     return this.prisma.user.update({

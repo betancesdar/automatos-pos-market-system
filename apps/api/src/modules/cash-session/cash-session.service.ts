@@ -60,13 +60,31 @@ export class CashSessionService {
       throw new BadRequestException('Esta caja ya fue cerrada');
     }
 
-    const cashSalesSum = await this.prisma.sale.aggregate({
-      where: { tenantId, cashSessionId: sessionId, paymentMethod: PaymentMethod.CASH },
-      _sum: { total: true },
-    });
+    const [cashSalesSum, movements] = await Promise.all([
+      this.prisma.sale.aggregate({
+        where: {
+          tenantId,
+          cashSessionId: sessionId,
+          paymentMethod: PaymentMethod.CASH,
+          status: 'COMPLETED',
+        },
+        _sum: { total: true },
+      }),
+      this.prisma.cashMovement.groupBy({
+        by: ['type'],
+        where: { tenantId, cashSessionId: sessionId },
+        _sum: { amount: true },
+      }),
+    ]);
+
+    const inflows = movements.find((m) => m.type === 'INFLOW')?._sum.amount ?? 0;
+    const outflows = movements.find((m) => m.type === 'OUTFLOW')?._sum.amount ?? 0;
 
     const cashSalesTotal = cashSalesSum._sum.total ?? 0;
-    const expectedClosingBalance = parseFloat((session.openingBalance + cashSalesTotal).toFixed(2));
+    // Expected drawer = opening + cash sales + manual inflows − manual outflows.
+    const expectedClosingBalance = parseFloat(
+      (session.openingBalance + cashSalesTotal + inflows - outflows).toFixed(2),
+    );
     const actual = parseFloat(actualClosingBalance.toFixed(2));
     const variance = parseFloat((actual - expectedClosingBalance).toFixed(2));
 
@@ -80,6 +98,26 @@ export class CashSessionService {
         status: 'CLOSED',
       },
     });
+
+    // Automatic reconciliation record for the accounting module — the
+    // accountant reviews/approves every drawer count from there.
+    await this.prisma.cashReconciliation
+      .create({
+        data: {
+          tenantId,
+          cashSessionId: sessionId,
+          expectedCash: expectedClosingBalance,
+          countedCash: actual,
+          difference: variance,
+          status: variance === 0 ? 'APPROVED' : 'PENDING_REVIEW',
+          ...(variance === 0
+            ? { reviewNotes: 'Cuadre exacto — aprobado automáticamente', reviewedAt: closedAt }
+            : {}),
+        },
+      })
+      .catch(() => {
+        // Reconciliation record must never block closing the drawer.
+      });
 
     const status = variance === 0 ? 'CAJA CUADRADA' : variance > 0 ? 'SOBRANTE' : 'FALTANTE';
     const receiptRaw = buildCashSessionCloseReceipt(

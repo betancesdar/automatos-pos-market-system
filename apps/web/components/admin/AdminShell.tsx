@@ -16,6 +16,7 @@ const NAV: NavItem[] = [
   { href: '/admin/sales', label: 'Facturas', icon: '🧾' },
   { href: '/admin/shifts', label: 'Turnos & Caja', icon: '💵' },
   { href: '/admin/reports', label: 'Reportes', icon: '📈' },
+  { href: '/admin/accounting', label: 'Contabilidad', icon: '🧮' },
   { href: '/admin/settings', label: 'Configuración', icon: '⚙️' },
 ];
 
