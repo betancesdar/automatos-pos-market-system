@@ -24,11 +24,15 @@ import { CreditModule } from './modules/credit/credit.module';
 import { ZonesModule } from './modules/zones/zones.module';
 import { AuditModule } from './common/audit.module';
 import { TenantLicenseMiddleware } from './common/tenant-license.middleware';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { JwtAuthGuard, PermissionsGuard } from './common/auth.guard';
 
 @Module({
   imports: [
     ScheduleModule.forRoot(),
+    // Rate limiting disponible; se aplica selectivamente (p. ej. /auth/login),
+    // no global, para no afectar el polling de la cola de caja.
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
     PrismaModule,
     CatalogModule,
     CategoriesModule,

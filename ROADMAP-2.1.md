@@ -2,6 +2,18 @@
 
 > Objetivo: convertir el MVP 2.0 en una plataforma sólida. Cada fase es **independiente, desplegable sola y sin deuda**. No es trabajo de 2 días: es un roadmap 2.1 por sprints. Ordenado por riesgo/dependencia.
 
+## Estado de implementación (rama release/2.0-biller-cashier)
+- ✅ **Fase 0** — Baseline de migraciones + política Decimal.
+- ✅ **Fase 1** — Caja busca por nombre; SuperAdmin sin corte + buscador/filtro.
+- ✅ **Fase 2** — RBAC: roles personalizados + permisos granulares.
+- ✅ **Fase 3** — Clientes + Cotizaciones (convertibles a pedido).
+- ✅ **Fase 4** — Crédito, cuotas, abonos y pagaré notarial.
+- ✅ **Fase 5** — Zonas de inventario (ubicación + filtro).
+- ✅ **Fase 6** — Contabilidad interactiva (movimientos manuales, cartera, drill-down).
+- 🟡 **Fase 7** — Hardening: ✅ rate limiting en /auth/login (5/min). **Pendiente a propósito** (ver nota al final): Float→Decimal en modelos existentes, `whitelist:true`, sacar `.env.production` + rotar secrets, WebSocket para la cola de caja.
+
+Todo lo anterior verificado en local (API tsc + web tsc + next build + pruebas de endpoints). Las migraciones se aplican solas con `migrate deploy` tras el baseline de §5.1 en DEPLOY-2.0.md.
+
 ## Principios de "sin deuda" que aplican a TODO el plan
 1. **Migraciones versionadas, no `db push` a ciegas.** Fase 0 establece el baseline `prisma migrate`. De ahí en adelante cada cambio de schema es una migración revisable y reversible.
 2. **Dinero en `Decimal(14,2)` en todo lo nuevo** (crédito, cuotas, abonos, balances de cliente). El `Float` actual queda documentado como hardening programado (Fase 7), no se mezcla en silencio.
@@ -143,13 +155,13 @@ El módulo hoy genera 606/607/608 y cierra períodos, pero el usuario quiere **i
 
 ## Fase 7 — Hardening (cerrar la deuda explícitamente, no en silencio)
 Se hace al final porque toca dinero y sesiones.
-- **`Float` → `Decimal(14,2)`** en los modelos de dinero existentes (Sale, SaleItem, CashSession, etc.) con migración de datos. Ajustar la aritmética de ventas.
-- `ValidationPipe({ whitelist: true })` una vez todos los DTOs estén decorados.
-- Sacar `.env.production` de git + rotar secrets (JWT/COOKIE/DB/Redis) de noche.
-- Throttler en `/auth/login`.
-- WebSocket para la cola de caja (hoy polling 4s).
+- ✅ **Rate limiting en `/auth/login`** (5 intentos/min por IP vía `@nestjs/throttler`, aplicado solo al login para no afectar el polling de la cola de caja). Verificado: 6º intento → 429.
+- 🟡 **`Float` → `Decimal(14,2)`** en los modelos de dinero existentes (Sale, SaleItem, CashSession, Purchase, Product). **Deferido a propósito:** es el cambio más riesgoso (toca toda la aritmética de ventas/caja/reportes) y el sistema funciona hoy con Float. Hacerlo apurado justo antes del lanzamiento introduce riesgo, no lo reduce. Los **modelos financieros nuevos (crédito, clientes) ya usan Decimal**. Se hará con una migración de datos dedicada + suite de pruebas de cálculo, fuera de la ventana de lanzamiento.
+- 🟡 `ValidationPipe({ whitelist: true })` — requiere que **todos** los DTOs legacy tengan decoradores class-validator; activarlo hoy stripearía propiedades no decoradas y rompería endpoints. Se activa cuando se terminen de decorar los DTOs.
+- 🟡 Sacar `.env.production` de git + rotar secrets (JWT/COOKIE/DB/Redis) — operativo, invalida sesiones; hacerlo de noche con el equipo (no es un cambio de código que deba ir en este commit).
+- 🟡 WebSocket para la cola de caja (hoy polling 4s) — mejora de rendimiento, no de seguridad; no bloquea.
 
-**Verificación:** suite de cálculos de venta con Decimal cuadra al centavo; login rate-limited; sin secretos en git.
+**Verificación (hecho):** login rate-limited (429 tras 5 intentos). **Pendiente:** suite de cálculos con Decimal; retirada de secretos de git.
 
 ---
 

@@ -14,6 +14,7 @@ import {
 import type { Response, Request } from 'express';
 import { AuthService, UsersService } from './users.service';
 import { Role } from '@prisma/client';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { Public, JwtAuthGuard, RequirePermissions } from '../../common/auth.guard';
 import { COOKIE_NAMES } from '../../common/jwt.util';
 import { TenantId } from '../../common/tenant.decorator';
@@ -57,6 +58,8 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('login')
   async login(@Body() body: LoginDto, @Res({ passthrough: true }) res: Response) {
     const { user, token } = await this.authService.login(body.identifier, body.password);
