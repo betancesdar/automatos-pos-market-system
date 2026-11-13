@@ -21,6 +21,7 @@ import { RolesModule } from './modules/roles/roles.module';
 import { CustomersModule } from './modules/customers/customers.module';
 import { QuotesModule } from './modules/quotes/quotes.module';
 import { CreditModule } from './modules/credit/credit.module';
+import { ZonesModule } from './modules/zones/zones.module';
 import { AuditModule } from './common/audit.module';
 import { TenantLicenseMiddleware } from './common/tenant-license.middleware';
 import { JwtAuthGuard, PermissionsGuard } from './common/auth.guard';
@@ -46,6 +47,7 @@ import { JwtAuthGuard, PermissionsGuard } from './common/auth.guard';
     CustomersModule,
     QuotesModule,
     CreditModule,
+    ZonesModule,
     AuditModule,
   ],
   controllers: [AppController],

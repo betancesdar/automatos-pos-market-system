@@ -180,10 +180,11 @@ export class CatalogService {
         quantityMin: data.quantityMin ?? 0,
         quantityMax: data.quantityMax ?? 0,
         categoryId: data.categoryId || null,
+        zoneId: data.zoneId || null,
         imageUrl: data.imageUrl?.trim() || null,
         tenantId,
       },
-      include: { category: true },
+      include: { category: true, zone: true },
     });
 
     if (product.barcode) {
@@ -192,7 +193,7 @@ export class CatalogService {
     return product;
   }
 
-  async listProducts(tenantId: string, categorySlug?: string, search?: string, categoryId?: string) {
+  async listProducts(tenantId: string, categorySlug?: string, search?: string, categoryId?: string, zoneId?: string) {
     await this.ensureDefaultCategories(tenantId);
 
     const where: Record<string, unknown> = { tenantId };
@@ -200,6 +201,9 @@ export class CatalogService {
       where.categoryId = categoryId;
     } else if (categorySlug && categorySlug !== 'TODOS') {
       where.category = { slug: categorySlug };
+    }
+    if (zoneId) {
+      where.zoneId = zoneId === 'NONE' ? null : zoneId;
     }
     if (search?.trim()) {
       where.OR = [
@@ -210,7 +214,7 @@ export class CatalogService {
 
     return this.prisma.product.findMany({
       where,
-      include: { category: true },
+      include: { category: true, zone: true },
       orderBy: { name: 'asc' },
     });
   }
@@ -261,9 +265,10 @@ export class CatalogService {
         ...(data.quantityMin !== undefined && { quantityMin: data.quantityMin }),
         ...(data.quantityMax !== undefined && { quantityMax: data.quantityMax }),
         ...(data.categoryId !== undefined && { categoryId: data.categoryId || null }),
+        ...(data.zoneId !== undefined && { zoneId: data.zoneId || null }),
         ...(data.imageUrl !== undefined && { imageUrl: data.imageUrl?.trim() || null }),
       },
-      include: { category: true },
+      include: { category: true, zone: true },
     });
 
     if (updated.barcode) {

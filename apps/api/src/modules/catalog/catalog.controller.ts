@@ -22,8 +22,9 @@ export class CatalogController {
     @Query('category') category?: string,
     @Query('search') search?: string,
     @Query('categoryId') categoryId?: string,
+    @Query('zoneId') zoneId?: string,
   ) {
-    return this.catalogService.listProducts(tenantId, category, search, categoryId);
+    return this.catalogService.listProducts(tenantId, category, search, categoryId, zoneId);
   }
 
   @RequirePermissions('catalog.view')

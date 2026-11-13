@@ -25,5 +25,6 @@ export class CreateProductDto {
   quantityMin?: number;
   quantityMax?: number | null;
   categoryId?: string;
+  zoneId?: string;
   imageUrl?: string;
 }

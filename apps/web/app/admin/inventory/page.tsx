@@ -29,9 +29,13 @@ interface Product {
   imageUrl: string | null;
   categoryId?: string | null;
   category?: { id: string; name: string; slug: string } | null;
+  zoneId?: string | null;
+  zone?: { id: string; name: string } | null;
 }
 
-type InvTab = 'products' | 'categories';
+interface Zone { id: string; name: string; description?: string | null; isActive: boolean; _count?: { products: number } }
+
+type InvTab = 'products' | 'categories' | 'zones';
 
 interface ProductForm {
   id: string;
@@ -51,6 +55,7 @@ interface ProductForm {
   quantityMax: number;
   imageUrl: string;
   categoryId: string;
+  zoneId: string;
 }
 
 const emptyProduct: ProductForm = {
@@ -71,6 +76,7 @@ const emptyProduct: ProductForm = {
   quantityMax: 0,
   imageUrl: '',
   categoryId: '',
+  zoneId: '',
 };
 
 const UOM_OPTIONS = ['Unidad', 'Libra', 'Kilogramo', 'Litro', 'Galón', 'Onza', 'Caja', 'Paquete', 'Servicio'];
@@ -98,8 +104,12 @@ export default function InventoryPage() {
   const [tab, setTab] = useState<InvTab>('products');
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [zones, setZones] = useState<Zone[]>([]);
   const [search, setSearch] = useState('');
+  const [zoneFilter, setZoneFilter] = useState('');
   const [loading, setLoading] = useState(true);
+  const [zoneForm, setZoneForm] = useState<{ id: string; name: string; description: string } | null>(null);
+  const [zoneError, setZoneError] = useState('');
 
   // Product modal
   const [productForm, setProductForm] = useState<ProductForm | null>(null);
@@ -115,12 +125,14 @@ export default function InventoryPage() {
     if (!tenantId) return;
     setLoading(true);
     try {
-      const [prods, cats] = await Promise.all([
+      const [prods, cats, zns] = await Promise.all([
         apiFetch<Product[]>('/catalog/products', tenantId),
         apiFetch<Category[]>('/categories', tenantId),
+        apiFetch<Zone[]>('/zones', tenantId),
       ]);
       setProducts(prods);
       setCategories(cats);
+      setZones(zns);
     } catch (err) {
       if (err instanceof LicenseBlockedError) setLicenseBlocked(err.message);
     } finally {
@@ -132,11 +144,31 @@ export default function InventoryPage() {
 
   const filteredProducts = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return products;
-    return products.filter(
-      (p) => p.name.toLowerCase().includes(q) || (p.barcode ?? '').toLowerCase().includes(q),
-    );
-  }, [products, search]);
+    return products.filter((p) => {
+      if (zoneFilter === 'NONE' && p.zoneId) return false;
+      if (zoneFilter && zoneFilter !== 'NONE' && p.zoneId !== zoneFilter) return false;
+      if (!q) return true;
+      return p.name.toLowerCase().includes(q) || (p.barcode ?? '').toLowerCase().includes(q);
+    });
+  }, [products, search, zoneFilter]);
+
+  const saveZone = async () => {
+    if (!zoneForm) return;
+    if (!zoneForm.name.trim()) { setZoneError('El nombre es obligatorio'); return; }
+    setZoneError('');
+    try {
+      const body = JSON.stringify({ name: zoneForm.name, description: zoneForm.description });
+      if (zoneForm.id) await apiFetch(`/zones/${zoneForm.id}`, tenantId, { method: 'PUT', body });
+      else await apiFetch('/zones', tenantId, { method: 'POST', body });
+      setZoneForm(null); load();
+    } catch (e) { setZoneError(e instanceof Error ? e.message : 'Error'); }
+  };
+
+  const deleteZone = async (z: Zone) => {
+    if (!confirm(`¿Eliminar la zona "${z.name}"? Los productos quedarán sin zona.`)) return;
+    try { await apiFetch(`/zones/${z.id}`, tenantId, { method: 'DELETE' }); load(); }
+    catch (e) { alert(e instanceof Error ? e.message : 'Error'); }
+  };
 
   // ── Product handlers ──────────────────────────────────────────────
   const openNewProduct = () => {
@@ -163,6 +195,7 @@ export default function InventoryPage() {
       quantityMax: p.quantityMax ?? 0,
       imageUrl: p.imageUrl ?? '',
       categoryId: p.categoryId ?? p.category?.id ?? '',
+      zoneId: p.zoneId ?? p.zone?.id ?? '',
     });
   };
 
@@ -189,6 +222,7 @@ export default function InventoryPage() {
         quantityMin: productForm.quantityMin,
         quantityMax: productForm.quantityMax,
         categoryId: productForm.categoryId || undefined,
+        zoneId: productForm.zoneId || null,
         imageUrl: productForm.imageUrl || undefined,
       });
       if (productForm.id) {
@@ -267,7 +301,7 @@ export default function InventoryPage() {
     >
       {/* Tab switch */}
       <div className="flex gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm sm:w-fit">
-        {([['products', '📦 Productos'], ['categories', '🏷️ Categorías']] as [InvTab, string][]).map(([id, label]) => (
+        {([['products', '📦 Productos'], ['categories', '🏷️ Categorías'], ['zones', '📍 Zonas']] as [InvTab, string][]).map(([id, label]) => (
           <button
             key={id}
             onClick={() => setTab(id)}
@@ -283,13 +317,21 @@ export default function InventoryPage() {
       {tab === 'products' && (
         <section className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar por nombre o código…"
-              className="w-full max-w-sm rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-            />
+            <div className="flex flex-1 flex-wrap items-center gap-3">
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar por nombre o código…"
+                className="w-full max-w-sm rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+              />
+              <select value={zoneFilter} onChange={(e) => setZoneFilter(e.target.value)}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400">
+                <option value="">Todas las zonas</option>
+                {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
+                <option value="NONE">Sin zona</option>
+              </select>
+            </div>
             <button
               onClick={openNewProduct}
               className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
@@ -306,6 +348,7 @@ export default function InventoryPage() {
                     <th className="px-6 py-3 text-left font-semibold">Producto</th>
                     <th className="px-4 py-3 text-left font-semibold">Código</th>
                     <th className="px-4 py-3 text-left font-semibold">Categoría</th>
+                    <th className="px-4 py-3 text-left font-semibold">Zona</th>
                     <th className="px-4 py-3 text-right font-semibold">Costo</th>
                     <th className="px-4 py-3 text-right font-semibold">Precio</th>
                     <th className="px-4 py-3 text-right font-semibold">Stock</th>
@@ -344,6 +387,11 @@ export default function InventoryPage() {
                           <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{p.category.name}</span>
                         ) : <span className="text-slate-400">—</span>}
                       </td>
+                      <td className="px-4 py-3">
+                        {p.zone ? (
+                          <span className="rounded-md bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-700">📍 {p.zone.name}</span>
+                        ) : <span className="text-slate-400">—</span>}
+                      </td>
                       <td className="px-4 py-3 text-right tabular-nums text-slate-500">{formatCurrency(p.cost)}</td>
                       <td className="px-4 py-3 text-right font-semibold tabular-nums">{formatCurrency(p.price)}</td>
                       <td className="px-4 py-3 text-right">
@@ -358,7 +406,7 @@ export default function InventoryPage() {
                     </tr>
                   ))}
                   {filteredProducts.length === 0 && (
-                    <tr><td colSpan={7} className="px-6 py-16 text-center text-slate-400">
+                    <tr><td colSpan={8} className="px-6 py-16 text-center text-slate-400">
                       {loading ? 'Cargando…' : 'No hay productos que coincidan.'}
                     </td></tr>
                   )}
@@ -414,12 +462,62 @@ export default function InventoryPage() {
         </section>
       )}
 
+      {tab === 'zones' && (
+        <section className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-slate-500">Agrupa y filtra productos por ubicación (pasillo, área, bodega).</p>
+            <button onClick={() => { setZoneError(''); setZoneForm({ id: '', name: '', description: '' }); }}
+              className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500">+ Nueva zona</button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {zones.map((z) => (
+              <div key={z.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="font-bold text-slate-800">📍 {z.name}</p>
+                    {z.description && <p className="text-xs text-slate-500">{z.description}</p>}
+                    <p className="mt-1 text-xs text-slate-400">{z._count?.products ?? 0} producto(s)</p>
+                  </div>
+                  <div className="flex gap-2 text-sm">
+                    <button onClick={() => { setZoneError(''); setZoneForm({ id: z.id, name: z.name, description: z.description ?? '' }); }} className="text-indigo-600 hover:underline">Editar</button>
+                    <button onClick={() => deleteZone(z)} className="text-red-600 hover:underline">Eliminar</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {zones.length === 0 && (
+              <p className="col-span-full py-12 text-center text-slate-400">{loading ? 'Cargando…' : 'No hay zonas. Crea la primera.'}</p>
+            )}
+          </div>
+        </section>
+      )}
+
+      {zoneForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setZoneForm(null)}>
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h2 className="mb-4 text-lg font-bold text-slate-900">{zoneForm.id ? 'Editar Zona' : 'Nueva Zona'}</h2>
+            {zoneError && <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{zoneError}</div>}
+            <div className="space-y-3">
+              <input value={zoneForm.name} onChange={(e) => setZoneForm({ ...zoneForm, name: e.target.value })}
+                placeholder="Nombre (ej. Pasillo 1, Nevera, Bodega)" autoFocus className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              <input value={zoneForm.description} onChange={(e) => setZoneForm({ ...zoneForm, description: e.target.value })}
+                placeholder="Descripción (opcional)" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            </div>
+            <div className="mt-4 flex gap-3">
+              <button onClick={() => setZoneForm(null)} className="flex-1 rounded-lg border border-slate-300 py-2 text-sm font-medium text-slate-600">Cancelar</button>
+              <button onClick={saveZone} className="flex-1 rounded-lg bg-indigo-600 py-2 text-sm font-semibold text-white">Guardar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Premium Product modal (image_2 layout) ── */}
       {productForm && (
         <ProductFormModal
           form={productForm}
           setForm={setProductForm}
           categories={categories}
+          zones={zones}
           error={productError}
           saving={savingProduct}
           onCancel={() => setProductForm(null)}
@@ -471,6 +569,7 @@ function ProductFormModal({
   form,
   setForm,
   categories,
+  zones,
   error,
   saving,
   onCancel,
@@ -479,6 +578,7 @@ function ProductFormModal({
   form: ProductForm;
   setForm: (f: ProductForm) => void;
   categories: Category[];
+  zones: Zone[];
   error: string;
   saving: boolean;
   onCancel: () => void;
@@ -574,6 +674,13 @@ function ProductFormModal({
                     <select value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })} className={inputCls}>
                       <option value="">Sin categoría</option>
                       {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls}>Zona</label>
+                    <select value={form.zoneId} onChange={(e) => setForm({ ...form, zoneId: e.target.value })} className={inputCls}>
+                      <option value="">Sin zona</option>
+                      {zones.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
                     </select>
                   </div>
                   <div>
