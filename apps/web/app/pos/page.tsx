@@ -975,8 +975,11 @@ export default function POSPage() {
             )}
           </div>
 
+          {/* Área desplazable: opciones fiscales + carrito. Los totales y el botón
+              de pago quedan FIJOS abajo para que nunca se corten. */}
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           {/* Fiscal options */}
-          <div className="space-y-3 border-b border-slate-200 px-4 py-3">
+          <div className="shrink-0 space-y-3 border-b border-slate-200 px-4 py-3">
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600">Tipo de Comprobante / NCF</label>
               <select
@@ -1012,7 +1015,7 @@ export default function POSPage() {
           </div>
 
           {/* Cart table */}
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="flex-1">
             {cart.length === 0 ? (
               <p className="py-16 text-center text-sm text-slate-400">Agrega productos desde la cuadrícula</p>
             ) : (
@@ -1066,9 +1069,10 @@ export default function POSPage() {
               </table>
             )}
           </div>
+          </div>
 
           {/* Totals & payment */}
-          <div className="border-t border-slate-200 bg-slate-50 p-4">
+          <div className="shrink-0 border-t border-slate-200 bg-slate-50 p-4">
             <div className="mb-3 space-y-1 text-sm">
               <div className="flex justify-between text-slate-600">
                 <span>Subtotal</span><span className="tabular-nums">RD$ {subtotal.toFixed(2)}</span>

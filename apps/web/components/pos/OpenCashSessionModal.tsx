@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/api';
 import type { CashSession } from '../../lib/pos-types';
 
@@ -17,8 +17,22 @@ interface OpenCashSessionModalProps {
  */
 export function OpenCashSessionModal({ tenantId, cashierName, onOpened }: OpenCashSessionModalProps) {
   const [openingBalance, setOpeningBalance] = useState('');
+  const [suggested, setSuggested] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  // Apertura sugerida: si el cierre anterior se marcó para "pasar el cuadre",
+  // se precarga ese monto. Si no, el cajero cuenta el fondo normalmente.
+  useEffect(() => {
+    apiFetch<{ suggestedOpening: number | null }>('/cash-sessions/suggested-opening', tenantId)
+      .then((d) => {
+        if (d.suggestedOpening != null) {
+          setSuggested(d.suggestedOpening);
+          setOpeningBalance(String(d.suggestedOpening));
+        }
+      })
+      .catch(() => undefined);
+  }, [tenantId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,9 +85,15 @@ export function OpenCashSessionModal({ tenantId, cashierName, onOpened }: OpenCa
               required
               className="w-full rounded-xl border-2 border-indigo-200 px-4 py-3 text-2xl font-bold tabular-nums outline-none focus:border-indigo-500"
             />
-            <p className="mt-2 text-xs text-slate-400">
-              Cuenta el efectivo físico presente en la caja antes de la primera venta.
-            </p>
+            {suggested != null ? (
+              <p className="mt-2 rounded-md bg-emerald-50 px-2 py-1.5 text-xs text-emerald-700">
+                💡 Apertura sugerida del cierre anterior: <b>RD$ {suggested.toFixed(2)}</b>. Puedes ajustarla si cuentas una diferencia.
+              </p>
+            ) : (
+              <p className="mt-2 text-xs text-slate-400">
+                Cuenta el efectivo físico presente en la caja antes de la primera venta.
+              </p>
+            )}
           </div>
           <button
             type="submit"

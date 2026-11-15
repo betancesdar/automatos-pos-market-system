@@ -15,6 +15,25 @@ export class CashSessionService {
     });
   }
 
+  /**
+   * Apertura sugerida: si en el último cierre el cajero marcó "dejar el conteo
+   * como apertura de la próxima caja", devuelve ese monto (una sola vez). Si no,
+   * devuelve null y el cajero cuenta el fondo al abrir el turno.
+   */
+  async getSuggestedOpening(tenantId: string, userId: string) {
+    const pending = await this.prisma.cashSession.findFirst({
+      where: { tenantId, userId, status: 'CLOSED', carryOverToNext: true, carryConsumed: false },
+      orderBy: { closedAt: 'desc' },
+      select: { id: true, actualClosingBalance: true, closedAt: true },
+    });
+    if (!pending || pending.actualClosingBalance == null) return { suggestedOpening: null };
+    return {
+      suggestedOpening: parseFloat(pending.actualClosingBalance.toFixed(2)),
+      fromSessionId: pending.id,
+      closedAt: pending.closedAt,
+    };
+  }
+
   /** Opens a new cash register session (Apertura de Caja). */
   async open(tenantId: string, userId: string, openingBalance: number) {
     if (openingBalance == null || openingBalance < 0) {
@@ -26,7 +45,7 @@ export class CashSessionService {
       throw new BadRequestException('Ya existe una caja abierta para este usuario');
     }
 
-    return this.prisma.cashSession.create({
+    const session = await this.prisma.cashSession.create({
       data: {
         tenantId,
         userId,
@@ -34,6 +53,15 @@ export class CashSessionService {
         status: 'OPEN',
       },
     });
+
+    // Consumir cualquier carry-over pendiente de este usuario (la sugerencia es
+    // de un solo uso, independientemente de si usó el monto exacto).
+    await this.prisma.cashSession.updateMany({
+      where: { tenantId, userId, status: 'CLOSED', carryOverToNext: true, carryConsumed: false },
+      data: { carryConsumed: true },
+    });
+
+    return session;
   }
 
   /**
@@ -41,7 +69,13 @@ export class CashSessionService {
    * expectedClosingBalance = openingBalance + cash sales recorded during the session.
    * variance = actualClosingBalance - expectedClosingBalance
    */
-  async close(tenantId: string, userId: string, sessionId: string, actualClosingBalance: number) {
+  async close(
+    tenantId: string,
+    userId: string,
+    sessionId: string,
+    actualClosingBalance: number,
+    carryOverToNext = false,
+  ) {
     if (actualClosingBalance == null || actualClosingBalance < 0) {
       throw new BadRequestException('El monto contado debe ser un valor válido');
     }
@@ -96,6 +130,8 @@ export class CashSessionService {
         expectedClosingBalance,
         actualClosingBalance: actual,
         status: 'CLOSED',
+        // Si se marca, el conteo quedará como apertura sugerida de la próxima caja.
+        carryOverToNext,
       },
     });
 

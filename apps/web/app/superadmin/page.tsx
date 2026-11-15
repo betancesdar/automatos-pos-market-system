@@ -63,7 +63,8 @@ export default function SuperadminPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'SUSPENDED' | 'EXPIRED'>('ALL');
   // Posición del menú de acciones (portal) — evita el recorte del overflow de la tabla.
-  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  // y = borde inferior del botón, yTop = borde superior (para voltear hacia arriba).
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number; yTop: number } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -384,7 +385,7 @@ export default function SuperadminPage() {
                         onClick={(e) => {
                           e.stopPropagation();
                           const r = e.currentTarget.getBoundingClientRect();
-                          setMenu(menu?.id === t.id ? null : { id: t.id, x: r.right, y: r.bottom });
+                          setMenu(menu?.id === t.id ? null : { id: t.id, x: r.right, y: r.bottom, yTop: r.top });
                         }}
                         className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-bold text-slate-300 hover:bg-slate-700"
                       >
@@ -404,14 +405,20 @@ export default function SuperadminPage() {
         </div>
       </main>
 
-      {/* Menú de acciones (portal) — posicionado en coordenadas fijas, nunca recortado */}
+      {/* Menú de acciones (portal) — posicionado en coordenadas fijas, nunca recortado.
+          Si no hay espacio abajo, se abre hacia arriba para no cortarse. */}
       {menu && (() => {
         const t = tenants.find((x) => x.id === menu.id);
         if (!t) return null;
+        const MENU_H = 320; // alto aproximado de los 6 ítems
+        const openUp = typeof window !== 'undefined' && window.innerHeight - menu.y < MENU_H;
+        const posStyle = openUp
+          ? { bottom: (typeof window !== 'undefined' ? window.innerHeight : 0) - menu.yTop + 4, left: menu.x }
+          : { top: menu.y + 4, left: menu.x };
         return createPortal(
           <div
-            className="fixed z-[200] w-56 -translate-x-full overflow-hidden rounded-lg border border-slate-700 bg-slate-900 shadow-2xl"
-            style={{ top: menu.y + 4, left: menu.x }}
+            className="fixed z-[200] max-h-[85vh] w-56 -translate-x-full overflow-y-auto rounded-lg border border-slate-700 bg-slate-900 shadow-2xl"
+            style={posStyle}
             onClick={(e) => e.stopPropagation()}
           >
             <button onClick={() => { setDetailTenant(t); setMenu(null); }}

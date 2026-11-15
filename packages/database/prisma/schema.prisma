@@ -241,6 +241,10 @@ model CashSession {
   expectedClosingBalance Float?
   actualClosingBalance   Float?
   status                 String              @default("OPEN")
+  // Carry-over: si al cerrar se marca, el efectivo contado queda como apertura
+  // sugerida de la próxima caja de este usuario (hasta que se consuma).
+  carryOverToNext        Boolean             @default(false)
+  carryConsumed          Boolean             @default(false)
   createdAt              DateTime            @default(now())
   sales                  Sale[]
   movements              CashMovement[]

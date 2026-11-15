@@ -29,6 +29,7 @@ interface CloseCashSessionModalProps {
  */
 export function CloseCashSessionModal({ isOpen, tenantId, session, onClose, onClosed }: CloseCashSessionModalProps) {
   const [actualClosingBalance, setActualClosingBalance] = useState('');
+  const [carryOver, setCarryOver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<CloseResult | null>(null);
@@ -47,7 +48,7 @@ export function CloseCashSessionModal({ isOpen, tenantId, session, onClose, onCl
     try {
       const data = await apiFetch<CloseResult>(`/cash-sessions/${session.id}/close`, tenantId, {
         method: 'POST',
-        body: JSON.stringify({ actualClosingBalance: value }),
+        body: JSON.stringify({ actualClosingBalance: value, carryOverToNext: carryOver }),
       });
       setResult(data);
       if (data.receiptRaw && typeof window !== 'undefined' && (window as any).printReceipt) {
@@ -124,6 +125,14 @@ export function CloseCashSessionModal({ isOpen, tenantId, session, onClose, onCl
                 Cuenta todo el efectivo físico en la caja. El sistema calculará automáticamente la diferencia.
               </p>
             </div>
+            <label className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+              <input type="checkbox" checked={carryOver} onChange={(e) => setCarryOver(e.target.checked)}
+                className="mt-0.5 rounded border-slate-300 text-amber-600" />
+              <span>
+                <b>Dejar este efectivo como apertura de la próxima caja.</b>
+                <span className="block text-xs text-slate-400">Si lo marcas, el monto contado será el fondo sugerido al abrir el siguiente turno. Si no, el cajero contará el fondo al abrir.</span>
+              </span>
+            </label>
             <div className="flex gap-3">
               <button type="button" onClick={onClose} className="flex-1 rounded-xl border border-slate-200 py-3 font-medium">
                 Cancelar

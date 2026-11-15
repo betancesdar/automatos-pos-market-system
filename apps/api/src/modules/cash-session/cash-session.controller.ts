@@ -11,6 +11,8 @@ class OpenCashSessionDto {
 
 class CloseCashSessionDto {
   actualClosingBalance: number;
+  /** Dejar el efectivo contado como apertura sugerida de la próxima caja. */
+  carryOverToNext?: boolean;
 }
 
 class CashMovementDto {
@@ -29,6 +31,12 @@ export class CashSessionController {
   @Get('current')
   getCurrent(@TenantId() tenantId: string, @Req() req: Request & { user: TokenPayload }) {
     return this.cashSessionService.getCurrent(tenantId, req.user.sub);
+  }
+
+  /** Apertura sugerida (carry-over del último cierre marcado), o null. */
+  @Get('suggested-opening')
+  suggestedOpening(@TenantId() tenantId: string, @Req() req: Request & { user: TokenPayload }) {
+    return this.cashSessionService.getSuggestedOpening(tenantId, req.user.sub);
   }
 
   @Get('live')
@@ -74,6 +82,6 @@ export class CashSessionController {
     @Body() body: CloseCashSessionDto,
     @Req() req: Request & { user: TokenPayload },
   ) {
-    return this.cashSessionService.close(tenantId, req.user.sub, id, body.actualClosingBalance);
+    return this.cashSessionService.close(tenantId, req.user.sub, id, body.actualClosingBalance, body.carryOverToNext ?? false);
   }
 }
