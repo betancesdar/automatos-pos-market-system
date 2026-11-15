@@ -6,8 +6,8 @@ import {
   getPairedWebUsbPrinter,
   isWebUsbSupported,
   openWebUsbPrinter,
+  printToWebUsb,
   requestWebUsbPrinter,
-  sendRawToWebUsbPrinter,
 } from '../lib/webusb-printer';
 import { printThermalReceiptHtml, type ThermalReceiptData } from '../lib/thermal-receipt';
 
@@ -56,6 +56,35 @@ export function ReceiptPrinter({ variant = 'floating' }: ReceiptPrinterProps) {
     })();
   }, []);
 
+  // Mantener el handle USB fresco: limpiar al desconectar y re-vincular al
+  // reconectar, para que la impresión se auto-sane sin recargar la página.
+  useEffect(() => {
+    if (!isWebUsbSupported() || !navigator.usb) return;
+    const onDisconnect = (e: Event) => {
+      const dev = (e as unknown as { device?: USBDevice }).device;
+      if (usbDevice && dev === usbDevice) {
+        setUsbDevice(null);
+        setUsbEndpoint(null);
+      }
+    };
+    const onConnect = async () => {
+      if (usbDevice) return;
+      const paired = await getPairedWebUsbPrinter();
+      if (!paired) return;
+      try {
+        const { device, endpointNumber } = await openWebUsbPrinter(paired);
+        setUsbDevice(device);
+        setUsbEndpoint(endpointNumber);
+      } catch { /* ignore — se reintentará al imprimir */ }
+    };
+    navigator.usb.addEventListener('disconnect', onDisconnect);
+    navigator.usb.addEventListener('connect', onConnect);
+    return () => {
+      navigator.usb?.removeEventListener('disconnect', onDisconnect);
+      navigator.usb?.removeEventListener('connect', onConnect);
+    };
+  }, [usbDevice]);
+
   const connectUsbPrinter = async () => {
     if (!isWebUsbSupported()) {
       alert('WebUSB no está soportado en este navegador. Usa Chrome o Edge de escritorio, o conecta por Web Serial.');
@@ -102,9 +131,13 @@ export function ReceiptPrinter({ variant = 'floating' }: ReceiptPrinterProps) {
     const hasRawPayload = !!base64RawString;
 
     try {
-      if (hasRawPayload && usbDevice && usbEndpoint !== null) {
+      // WebUSB con auto-sanación: verifica/reabre el handle y reintenta si el SO
+      // suspendió el USB, sin forzar al cajero a recargar la página.
+      if (hasRawPayload && isWebUsbSupported() && (usbDevice || (await getPairedWebUsbPrinter()))) {
         const data = base64ToUint8Array(base64RawString);
-        await sendRawToWebUsbPrinter(usbDevice, usbEndpoint, data);
+        const ready = await printToWebUsb(usbDevice, data);
+        if (ready.device !== usbDevice) setUsbDevice(ready.device);
+        setUsbEndpoint(ready.endpointNumber);
         return;
       }
 

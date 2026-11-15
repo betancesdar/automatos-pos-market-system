@@ -74,6 +74,52 @@ export async function openWebUsbPrinter(device: USBDevice): Promise<{ device: US
   return { device, endpointNumber: outEndpoint.endpointNumber };
 }
 
+/**
+ * Garantiza que la impresora ya pareada esté lista ANTES de imprimir.
+ * El sistema operativo suspende el USB por ahorro de energía y deja el handle
+ * cerrado/colgado; aquí lo re-adquirimos en silencio sin pedir al usuario que
+ * recargue la página. Devuelve el handle vivo + su endpoint de salida.
+ */
+export async function ensureWebUsbPrinterReady(
+  device: USBDevice | null,
+): Promise<{ device: USBDevice; endpointNumber: number }> {
+  // Si no hay handle o el navegador lo invalidó, recuperar el dispositivo pareado.
+  let dev = device;
+  if (!dev || !dev.opened) {
+    const paired = await getPairedWebUsbPrinter();
+    if (paired) dev = paired;
+  }
+  if (!dev) throw new Error('No hay impresora USB pareada. Conéctala una vez con "Conectar impresora".');
+
+  // Re-inicialización silenciosa (open → selectConfiguration → claimInterface).
+  return openWebUsbPrinter(dev);
+}
+
+/**
+ * Envía bytes ESC/POS con AUTO-SANACIÓN: verifica/reabre el dispositivo antes de
+ * imprimir y, si `transferOut` falla (p. ej. "The device was disconnected"),
+ * fuerza un re-open/re-claim y reintenta una vez. No requiere recargar la página.
+ * Devuelve el handle vivo para que el llamador actualice su estado.
+ */
+export async function printToWebUsb(
+  device: USBDevice | null,
+  data: Uint8Array,
+): Promise<{ device: USBDevice; endpointNumber: number }> {
+  let ready = await ensureWebUsbPrinterReady(device);
+  try {
+    await sendRawToWebUsbPrinter(ready.device, ready.endpointNumber, data);
+    return ready;
+  } catch (err) {
+    // El handle quedó obsoleto a mitad de camino → reabrir y reintentar una vez.
+    try {
+      try { if (ready.device.opened) await ready.device.close(); } catch { /* ignore */ }
+    } catch { /* ignore */ }
+    ready = await ensureWebUsbPrinterReady(null); // fuerza getDevices() fresco
+    await sendRawToWebUsbPrinter(ready.device, ready.endpointNumber, data);
+    return ready;
+  }
+}
+
 /** Sends raw ESC/POS bytes directly to the USB printer's bulk-out endpoint. */
 export async function sendRawToWebUsbPrinter(device: USBDevice, endpointNumber: number, data: Uint8Array): Promise<void> {
   const result = await device.transferOut(endpointNumber, data);
