@@ -54,7 +54,7 @@ export function CashCloseModal({ isOpen, tenantId, expectedCash, onClose, onSucc
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-xl">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-xl">
         <div className="border-b border-slate-200 px-6 py-4">
           <h2 className="text-lg font-bold text-slate-900">Realizar Cierre de Caja</h2>
           {expectedCash != null && (

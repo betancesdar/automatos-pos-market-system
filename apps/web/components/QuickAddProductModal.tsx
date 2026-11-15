@@ -42,7 +42,7 @@ export function QuickAddProductModal({ isOpen, barcode, suggestedName, onClose, 
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
+      <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
         <div className="bg-blue-600 p-4">
           <h2 className="text-2xl font-bold text-white tracking-tight">Agregar Producto Rápido</h2>
           <p className="text-blue-200 text-sm mt-1">Código: {barcode}</p>

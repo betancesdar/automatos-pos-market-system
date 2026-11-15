@@ -44,7 +44,7 @@ export function OpenCashSessionModal({ tenantId, cashierName, onOpened }: OpenCa
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/70 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-2xl">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl">
         <div className="rounded-t-2xl bg-indigo-600 px-6 py-5">
           <h2 className="text-xl font-bold text-white">🔓 Apertura de Caja</h2>
           <p className="mt-1 text-sm text-indigo-100">

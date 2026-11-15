@@ -446,7 +446,7 @@ export default function SuperadminPage() {
       {/* Create Tenant Modal */}
       {modalType === 'create' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
             <div className="border-b border-slate-800 px-6 py-4">
               <h3 className="text-lg font-bold text-white">Registrar Nuevo Minimarket</h3>
               <p className="text-sm text-slate-500">Licencia activa por 1 año automáticamente</p>
@@ -515,7 +515,7 @@ export default function SuperadminPage() {
       {/* Edit Tenant Modal */}
       {modalType === 'edit' && selectedTenant && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
             <div className="border-b border-slate-800 px-6 py-4">
               <h3 className="text-lg font-bold text-white">Editar Comercio</h3>
               <p className="text-sm text-slate-500">{selectedTenant.name}</p>
@@ -576,7 +576,7 @@ export default function SuperadminPage() {
       {/* Renew Tenant Modal */}
       {modalType === 'renew' && selectedTenant && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
             <div className="border-b border-slate-800 px-6 py-4">
               <h3 className="text-lg font-bold text-white">Renovar / Activar</h3>
               <p className="text-sm text-slate-500">{selectedTenant.name}</p>
@@ -625,7 +625,7 @@ export default function SuperadminPage() {
       {/* Delete Tenant Modal */}
       {modalType === 'delete' && selectedTenant && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-red-700 bg-slate-900 shadow-2xl">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-red-700 bg-slate-900 shadow-2xl">
             <div className="border-b border-red-800 bg-red-950/50 px-6 py-4">
               <h3 className="text-lg font-bold text-red-400">⚠️ Confirmar Eliminación</h3>
             </div>

@@ -831,7 +831,7 @@ export default function AccountingPage() {
       {/* Review modal */}
       {reviewTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white shadow-2xl">
             <div className="border-b border-slate-200 px-6 py-4">
               <h3 className="text-lg font-bold text-slate-900">Revisar Conciliación</h3>
               <p className="text-sm text-slate-500">

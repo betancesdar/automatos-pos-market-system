@@ -71,12 +71,12 @@ export function PronesoftMatrizModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 text-slate-200 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-slate-700 px-6 py-4">
+      <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 text-slate-200 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-700 px-6 py-4">
           <h2 className="text-lg font-bold text-white">⚡ Pronesoft (empresa matriz)</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white">✕</button>
         </div>
-        <div className="space-y-4 p-6">
+        <div className="flex-1 space-y-4 overflow-y-auto p-6">
           <p className="text-xs text-slate-400">
             Una sola credencial (tu App matriz) opera por todas las empresas asociadas vía <code className="text-slate-300">x-tenant-id</code>.
             El secret es de solo escritura (se guarda cifrado).

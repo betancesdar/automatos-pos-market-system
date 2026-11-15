@@ -79,7 +79,7 @@ export function SendToCashierModal({
   if (sentOrder) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-        <div className="w-full max-w-md rounded-2xl bg-white text-center shadow-2xl">
+        <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white text-center shadow-2xl">
           <div className="rounded-t-2xl bg-indigo-600 px-6 py-5">
             <p className="text-sm font-semibold uppercase tracking-wider text-indigo-200">
               Pedido enviado a caja
@@ -114,7 +114,7 @@ export function SendToCashierModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white shadow-2xl">
         <div className="rounded-t-2xl bg-indigo-600 px-6 py-4">
           <h3 className="text-xl font-bold text-white">Enviar a Caja</h3>
           <p className="text-2xl font-black tabular-nums text-white">RD$ {total.toFixed(2)}</p>

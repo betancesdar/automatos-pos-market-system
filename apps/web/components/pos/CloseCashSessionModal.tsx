@@ -68,7 +68,7 @@ export function CloseCashSessionModal({ isOpen, tenantId, session, onClose, onCl
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-2xl">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl">
         <div className="rounded-t-2xl bg-amber-600 px-6 py-5">
           <h2 className="text-xl font-bold text-white">🔒 Cerrar Caja</h2>
           <p className="mt-1 text-sm text-amber-100">Conteo a ciegas — no se muestra el monto esperado</p>
