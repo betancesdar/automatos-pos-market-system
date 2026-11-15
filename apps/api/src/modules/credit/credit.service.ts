@@ -17,6 +17,8 @@ export interface CreditCheckoutDto {
   downPayment?: number;
   installmentsCount: number;
   frequency?: CreditFrequency;
+  /** Intervalo en días cuando frequency = CUSTOM (ej. cada 10 días). */
+  intervalDays?: number;
   firstDueDate: string;
   lateFeePercent?: number;
   ncfType?: NcfType;
@@ -49,16 +51,18 @@ export class CreditService {
     private salesService: SalesService,
   ) {}
 
-  private addPeriod(base: Date, freq: CreditFrequency, n: number): Date {
+  private addPeriod(base: Date, freq: CreditFrequency, n: number, intervalDays?: number | null): Date {
     const d = new Date(base);
-    if (freq === CreditFrequency.WEEKLY) d.setDate(d.getDate() + 7 * n);
+    if (freq === CreditFrequency.DAILY) d.setDate(d.getDate() + n);
+    else if (freq === CreditFrequency.WEEKLY) d.setDate(d.getDate() + 7 * n);
     else if (freq === CreditFrequency.BIWEEKLY) d.setDate(d.getDate() + 14 * n);
-    else d.setMonth(d.getMonth() + n);
+    else if (freq === CreditFrequency.CUSTOM) d.setDate(d.getDate() + (intervalDays ?? 1) * n);
+    else d.setMonth(d.getMonth() + n); // MONTHLY
     return d;
   }
 
   /** Reparte `financed` en `count` cuotas (2 decimales); la última absorbe el redondeo. */
-  private buildSchedule(financed: Prisma.Decimal, count: number, first: Date, freq: CreditFrequency) {
+  private buildSchedule(financed: Prisma.Decimal, count: number, first: Date, freq: CreditFrequency, intervalDays?: number | null) {
     const base = financed.div(count).toDecimalPlaces(2, Prisma.Decimal.ROUND_DOWN);
     const rows: { number: number; dueDate: Date; amount: Prisma.Decimal; paidAmount: Prisma.Decimal; status: InstallmentStatus }[] = [];
     let acc = D(0);
@@ -67,7 +71,7 @@ export class CreditService {
       acc = acc.add(amount);
       rows.push({
         number: i,
-        dueDate: this.addPeriod(first, freq, i - 1),
+        dueDate: this.addPeriod(first, freq, i - 1, intervalDays),
         amount,
         paidAmount: D(0),
         status: InstallmentStatus.PENDING,
@@ -130,7 +134,8 @@ export class CreditService {
 
       const firstDue = new Date(dto.firstDueDate);
       const freq = dto.frequency ?? CreditFrequency.MONTHLY;
-      const schedule = this.buildSchedule(financed, dto.installmentsCount, firstDue, freq);
+      const intervalDays = freq === CreditFrequency.CUSTOM ? Math.max(1, dto.intervalDays ?? 1) : null;
+      const schedule = this.buildSchedule(financed, dto.installmentsCount, firstDue, freq, intervalDays);
 
       const credit = await tx.creditSale.create({
         data: {
@@ -142,6 +147,7 @@ export class CreditService {
           financedAmount: financed,
           installmentsCount: dto.installmentsCount,
           frequency: freq,
+          intervalDays,
           firstDueDate: firstDue,
           lateFeePercent: D(dto.lateFeePercent ?? 0),
           balance: financed,
@@ -193,7 +199,7 @@ export class CreditService {
         `${customer.address ? `, domiciliado(a) en ${customer.address}` : ''}, ` +
         `reconozco deber y me obligo a pagar la suma de RD$ ${financed.toFixed(2)} ` +
         `(${montoEnLetras(Number(financed))}), en ${dto.installmentsCount} cuota(s) ` +
-        `${freq === 'WEEKLY' ? 'semanal(es)' : freq === 'BIWEEKLY' ? 'quincenal(es)' : 'mensual(es)'}, ` +
+        `${freq === 'DAILY' ? 'diaria(s)' : freq === 'WEEKLY' ? 'semanal(es)' : freq === 'BIWEEKLY' ? 'quincenal(es)' : freq === 'CUSTOM' ? `cada ${intervalDays} día(s)` : 'mensual(es)'}, ` +
         `iniciando el ${firstDue.toLocaleDateString('es-DO')}.` +
         (Number(dto.lateFeePercent ?? 0) > 0
           ? ` En caso de mora se aplicará un recargo del ${dto.lateFeePercent}% sobre la cuota vencida.`
@@ -253,23 +259,42 @@ export class CreditService {
     }
   }
 
-  async listReceivables(tenantId: string, opts?: { status?: string; customerId?: string; search?: string }) {
+  async listReceivables(
+    tenantId: string,
+    opts?: { status?: string; customerId?: string; search?: string; page?: number; limit?: number },
+  ) {
     await this.refreshOverdue(tenantId);
     const where: Prisma.CreditSaleWhereInput = { tenantId };
     if (opts?.status && opts.status !== 'ALL') where.status = opts.status as CreditStatus;
     if (opts?.customerId) where.customerId = opts.customerId;
     const term = opts?.search?.trim();
-    if (term) where.customer = { name: { contains: term, mode: 'insensitive' } };
-    return this.prisma.creditSale.findMany({
-      where,
-      include: {
-        customer: { select: { id: true, name: true, phone: true } },
-        sale: { select: { invoiceNumber: true, ncf: true, createdAt: true } },
-        installments: { select: { dueDate: true, status: true }, orderBy: { number: 'asc' } },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-    });
+    if (term) {
+      where.customer = {
+        OR: [
+          { name: { contains: term, mode: 'insensitive' } },
+          { docNumber: { contains: term.replace(/\D/g, '') || term } },
+          { phone: { contains: term } },
+        ],
+      };
+    }
+
+    const page = Math.max(1, opts?.page ?? 1);
+    const limit = Math.min(100, Math.max(5, opts?.limit ?? 20));
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.creditSale.count({ where }),
+      this.prisma.creditSale.findMany({
+        where,
+        include: {
+          customer: { select: { id: true, name: true, phone: true } },
+          sale: { select: { invoiceNumber: true, ncf: true, createdAt: true } },
+          installments: { select: { dueDate: true, status: true }, orderBy: { number: 'asc' } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ]);
+    return { rows, total, page, limit, pages: Math.max(1, Math.ceil(total / limit)) };
   }
 
   async getCreditSale(tenantId: string, id: string) {

@@ -626,9 +626,11 @@ model QuoteItem {
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum CreditFrequency {
+  DAILY
   WEEKLY
   BIWEEKLY
   MONTHLY
+  CUSTOM
 }
 
 enum CreditStatus {
@@ -657,6 +659,8 @@ model CreditSale {
   financedAmount   Decimal         @db.Decimal(14, 2) // principal - inicial
   installmentsCount Int
   frequency        CreditFrequency @default(MONTHLY)
+  // Intervalo en días cuando frequency = CUSTOM (ej. cada 10 días)
+  intervalDays     Int?
   firstDueDate     DateTime
   lateFeePercent   Decimal         @default(0) @db.Decimal(5, 2) // recargo por mora (%)
   balance          Decimal         @db.Decimal(14, 2) // saldo pendiente

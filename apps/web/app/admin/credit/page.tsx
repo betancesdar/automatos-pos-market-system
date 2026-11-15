@@ -33,6 +33,10 @@ export default function CreditPage() {
   const [dash, setDash] = useState<{ porCobrar: number; vencido: number; cuentas: Record<string, number> } | null>(null);
   const [list, setList] = useState<CreditSale[]>([]);
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
   const [selected, setSelected] = useState<CreditSale | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -47,6 +51,7 @@ export default function CreditPage() {
   const [down, setDown] = useState('0');
   const [count, setCount] = useState('3');
   const [freq, setFreq] = useState('MONTHLY');
+  const [intervalDays, setIntervalDays] = useState('10');
   const [firstDue, setFirstDue] = useState('');
   const [lateFee, setLateFee] = useState('0');
 
@@ -56,16 +61,25 @@ export default function CreditPage() {
 
   const loadList = useCallback(async () => {
     try {
-      const q = statusFilter === 'ALL' ? '' : `?status=${statusFilter}`;
+      const params = new URLSearchParams({ page: String(page), limit: '20' });
+      if (statusFilter !== 'ALL') params.set('status', statusFilter);
+      if (search.trim()) params.set('search', search.trim());
       const [d, l] = await Promise.all([
         apiFetch<typeof dash>('/credit/dashboard', tenantId),
-        apiFetch<CreditSale[]>(`/credit${q}`, tenantId),
+        apiFetch<{ rows: CreditSale[]; total: number; pages: number }>(`/credit?${params.toString()}`, tenantId),
       ]);
-      setDash(d); setList(l);
+      setDash(d); setList(l.rows); setTotalCount(l.total); setPages(l.pages);
     } catch (e) { setError(e instanceof Error ? e.message : 'Error'); }
-  }, [tenantId, statusFilter]);
+  }, [tenantId, statusFilter, search, page]);
 
-  useEffect(() => { loadList(); }, [loadList]);
+  // Reiniciar a la página 1 al cambiar filtro o búsqueda.
+  useEffect(() => { setPage(1); }, [statusFilter, search]);
+
+  // Debounce de la búsqueda para no golpear en cada tecla.
+  useEffect(() => {
+    const t = setTimeout(() => { loadList(); }, 300);
+    return () => clearTimeout(t);
+  }, [loadList]);
 
   const openForm = async () => {
     setShowForm(true);
@@ -104,6 +118,7 @@ export default function CreditPage() {
           downPayment: parseFloat(down) || 0,
           installmentsCount: parseInt(count, 10) || 1,
           frequency: freq,
+          intervalDays: freq === 'CUSTOM' ? parseInt(intervalDays, 10) || 1 : undefined,
           firstDueDate: firstDue,
           lateFeePercent: parseFloat(lateFee) || 0,
         }),
@@ -174,8 +189,14 @@ export default function CreditPage() {
             </button>
           ))}
         </div>
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar por nombre, documento o teléfono…"
+          className="min-w-[220px] flex-1 rounded-lg border border-slate-300 px-4 py-2 text-sm outline-none focus:border-indigo-500"
+        />
         {can('credit.sell') && (
-          <button onClick={openForm} className="ml-auto rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500">
+          <button onClick={openForm} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500">
             + Nueva venta a crédito
           </button>
         )}
@@ -199,9 +220,19 @@ export default function CreditPage() {
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">Frecuencia</label>
               <select value={freq} onChange={(e) => setFreq(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                <option value="WEEKLY">Semanal</option><option value="BIWEEKLY">Quincenal</option><option value="MONTHLY">Mensual</option>
+                <option value="DAILY">Diaria</option>
+                <option value="WEEKLY">Semanal</option>
+                <option value="BIWEEKLY">Quincenal</option>
+                <option value="MONTHLY">Mensual</option>
+                <option value="CUSTOM">Cada X días…</option>
               </select>
             </div>
+            {freq === 'CUSTOM' && (
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Cada cuántos días</label>
+                <input type="number" min={1} value={intervalDays} onChange={(e) => setIntervalDays(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              </div>
+            )}
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">Inicial (RD$)</label>
               <input type="number" value={down} onChange={(e) => setDown(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
@@ -278,6 +309,17 @@ export default function CreditPage() {
               ))}
             </tbody>
           </table>
+          {pages > 1 && (
+            <div className="flex items-center justify-between border-t border-slate-200 px-4 py-2 text-sm">
+              <span className="text-slate-500">{totalCount} cuenta(s) · pág. {page} de {pages}</span>
+              <div className="flex gap-2">
+                <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}
+                  className="rounded-lg border border-slate-300 px-3 py-1 font-medium text-slate-600 disabled:opacity-40">← Anterior</button>
+                <button onClick={() => setPage((p) => Math.min(pages, p + 1))} disabled={page >= pages}
+                  className="rounded-lg border border-slate-300 px-3 py-1 font-medium text-slate-600 disabled:opacity-40">Siguiente →</button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="lg:col-span-2">
