@@ -15,10 +15,18 @@ export class FinanceService {
   async getFinancialSummary(tenantId: string, from?: string, to?: string) {
     const dateFilter = this.buildDateFilter(from, to);
 
-    const sales = await this.prisma.sale.findMany({
-      where: { tenantId, status: { not: 'VOIDED' }, createdAt: dateFilter },
-      include: { items: { include: { product: true } } },
-    });
+    const [sales, movements] = await Promise.all([
+      this.prisma.sale.findMany({
+        where: { tenantId, status: { not: 'VOIDED' }, createdAt: dateFilter },
+        include: { items: { include: { product: true } } },
+      }),
+      // Entradas y salidas de caja (movimientos manuales) del período.
+      this.prisma.cashMovement.groupBy({
+        by: ['type'],
+        where: { tenantId, createdAt: dateFilter },
+        _sum: { amount: true },
+      }),
+    ]);
 
     let grossRevenue = 0;
     let totalCost = 0;
@@ -32,6 +40,8 @@ export class FinanceService {
       }
     }
 
+    const cashInflows = movements.find((m) => m.type === 'INFLOW')?._sum.amount ?? 0;
+    const cashOutflows = movements.find((m) => m.type === 'OUTFLOW')?._sum.amount ?? 0;
     const netProfit = grossRevenue - totalCost;
     const grossMarginPercent = grossRevenue > 0 ? ((netProfit / grossRevenue) * 100).toFixed(2) : '0.00';
 
@@ -43,6 +53,10 @@ export class FinanceService {
       netProfit: parseFloat(netProfit.toFixed(2)),
       grossMarginPercent: parseFloat(grossMarginPercent),
       totalItbis: parseFloat(totalItbis.toFixed(2)),
+      // Movimientos de caja (entradas/salidas) ahora reflejados en el resumen.
+      cashInflows: parseFloat(cashInflows.toFixed(2)),
+      cashOutflows: parseFloat(cashOutflows.toFixed(2)),
+      netCashFlow: parseFloat((cashInflows - cashOutflows).toFixed(2)),
     };
   }
 

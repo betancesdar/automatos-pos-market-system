@@ -988,6 +988,11 @@ export default function POSPage() {
                   <option key={r.value} value={r.value}>{r.label}</option>
                 ))}
               </select>
+              {'help' in receiptConfig && receiptConfig.help && (
+                <p className="mt-1 rounded-md bg-slate-50 px-2 py-1 text-[11px] leading-snug text-slate-500">
+                  💡 {receiptConfig.help}
+                </p>
+              )}
             </div>
 
             <label className="flex items-center gap-2 text-sm text-slate-700">
