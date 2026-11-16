@@ -75,6 +75,54 @@ export async function apiFetch<T>(
   return handleResponse<T>(res);
 }
 
+/** Descarga autenticada (CSV/XLSX/PDF): trae el blob y dispara la descarga en el navegador. */
+export async function apiDownload(path: string, tenantId: string, fallbackName = 'archivo'): Promise<void> {
+  const separator = path.includes('?') ? '&' : '?';
+  const impersonationToken = typeof window !== 'undefined' ? localStorage.getItem('impersonation_token') : null;
+  const headers: Record<string, string> = {};
+  if (impersonationToken) headers['Authorization'] = `Bearer ${impersonationToken}`;
+
+  const res = await fetch(`/api/proxy${path}${separator}tenantId=${encodeURIComponent(tenantId)}`, {
+    credentials: 'include',
+    headers,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = 'Error al descargar';
+    try { msg = parseError(JSON.parse(text)); } catch { /* keep default */ }
+    throw new Error(msg);
+  }
+  const cd = res.headers.get('content-disposition') || '';
+  const match = cd.match(/filename="?([^"]+)"?/);
+  const filename = match?.[1] || fallbackName;
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/** Subida autenticada de un archivo (multipart). No fija Content-Type (lo pone el navegador). */
+export async function apiUpload<T>(path: string, tenantId: string, formData: FormData): Promise<T> {
+  const separator = path.includes('?') ? '&' : '?';
+  const impersonationToken = typeof window !== 'undefined' ? localStorage.getItem('impersonation_token') : null;
+  const headers: Record<string, string> = {};
+  if (impersonationToken) headers['Authorization'] = `Bearer ${impersonationToken}`;
+
+  const res = await fetch(`/api/proxy${path}${separator}tenantId=${encodeURIComponent(tenantId)}`, {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+    body: formData,
+  });
+  return handleResponse<T>(res);
+}
+
 export async function superadminFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`/api/proxy${path}`, {
     ...options,

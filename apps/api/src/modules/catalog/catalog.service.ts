@@ -5,6 +5,8 @@ import { ProductType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { buildSpreadsheet, readTabular, type SheetColumn } from '../../common/spreadsheet.util';
+import { parseXpsToRows } from '../../common/xps-parser.util';
 
 /** Final (tax-inclusive) price = basePrice * (1 + taxPercentage/100). */
 export function computeFinalPrice(basePrice: number, taxPercentage: number): number {
@@ -292,4 +294,277 @@ export class CatalogService {
     await this.prisma.product.delete({ where: { id: productId } });
     return { deleted: true };
   }
+
+  // ─────────────────────── Exportar inventario (CSV / XLSX) ───────────────────────
+
+  async exportProducts(tenantId: string, format: 'csv' | 'xlsx'): Promise<Buffer> {
+    const products = await this.prisma.product.findMany({
+      where: { tenantId },
+      include: { category: { select: { name: true } }, zone: { select: { name: true } } },
+      orderBy: { name: 'asc' },
+    });
+    const rows = products.map((p) => ({
+      sku: p.sku ?? '',
+      barcode: p.barcode ?? '',
+      name: p.name,
+      category: p.category?.name ?? '',
+      zone: p.zone?.name ?? '',
+      cost: p.cost,
+      basePrice: p.basePrice,
+      tax: p.taxPercentage,
+      price: p.price,
+      stock: p.stock,
+      min: p.quantityMin,
+      uom: p.uom ?? 'Unidad',
+    }));
+    return buildSpreadsheet(format, 'Inventario', EXPORT_COLUMNS, rows);
+  }
+
+  // ─────────────────────── Importar inventario (CSV / XLSX / XPS) ───────────────────────
+
+  /** Paso 1: lee el archivo a filas y sugiere el mapeo de columnas (sin tocar la BD). */
+  async parseImportFile(buffer: Buffer, filename: string) {
+    const ext = (filename.split('.').pop() ?? '').toLowerCase();
+    let rows: string[][];
+    let source: 'csv' | 'xlsx' | 'xps';
+    let hasHeaderRow: boolean;
+
+    if (ext === 'xps') {
+      rows = await parseXpsToRows(buffer);
+      source = 'xps';
+      hasHeaderRow = false; // el XPS no trae encabezados fiables
+    } else if (ext === 'xlsx' || ext === 'xls') {
+      rows = await readTabular(buffer, 'xlsx');
+      source = 'xlsx';
+      hasHeaderRow = true;
+    } else if (ext === 'csv' || ext === 'txt') {
+      rows = await readTabular(buffer, 'csv');
+      source = 'csv';
+      hasHeaderRow = true;
+    } else {
+      throw new BadRequestException('Formato no soportado. Usa CSV, Excel (.xlsx) o XPS.');
+    }
+
+    rows = rows.filter((r) => r.some((c) => (c ?? '').trim() !== ''));
+    if (rows.length === 0) throw new BadRequestException('El archivo está vacío o no se pudo leer.');
+
+    // Normalizar ancho de columnas (todas las filas con la misma cantidad).
+    const width = rows.reduce((m, r) => Math.max(m, r.length), 0);
+    rows = rows.map((r) => {
+      const copy = r.slice(0, width);
+      while (copy.length < width) copy.push('');
+      return copy;
+    });
+
+    const suggestedMapping = hasHeaderRow ? rows[0].map((h) => guessField(h)) : new Array(width).fill('');
+
+    return { source, hasHeaderRow, rows: rows.slice(0, 500), totalRows: rows.length, suggestedMapping, fields: IMPORT_FIELDS };
+  }
+
+  /** Paso 2: aplica el import con el mapeo confirmado. Devuelve un resumen. */
+  async commitImport(
+    tenantId: string,
+    dto: {
+      rows: string[][];
+      mapping: string[]; // por índice de columna → field ('' = ignorar)
+      hasHeaderRow?: boolean;
+      options?: { updateExisting?: boolean; createMissingCategories?: boolean; createMissingZones?: boolean };
+    },
+  ) {
+    const options = {
+      updateExisting: dto.options?.updateExisting ?? true,
+      createMissingCategories: dto.options?.createMissingCategories ?? true,
+      createMissingZones: dto.options?.createMissingZones ?? true,
+    };
+    const mapping = dto.mapping ?? [];
+    const colOf = (field: string) => mapping.findIndex((f) => f === field);
+    if (colOf('name') < 0) {
+      throw new BadRequestException('Debes mapear al menos la columna «Nombre».');
+    }
+
+    let dataRows = dto.rows ?? [];
+    if (dto.hasHeaderRow) dataRows = dataRows.slice(1);
+
+    const get = (row: string[], field: string): string => {
+      const i = colOf(field);
+      return i >= 0 ? (row[i] ?? '').trim() : '';
+    };
+
+    // Catálogos en memoria (nombre en minúsculas → id); se crean faltantes si aplica.
+    const [cats, zones] = await Promise.all([
+      this.prisma.category.findMany({ where: { tenantId }, select: { id: true, name: true } }),
+      this.prisma.zone.findMany({ where: { tenantId }, select: { id: true, name: true } }),
+    ]);
+    const catMap = new Map(cats.map((c) => [c.name.toLowerCase(), c.id]));
+    const zoneMap = new Map(zones.map((z) => [z.name.toLowerCase(), z.id]));
+
+    const tenantPlan = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { planRef: { select: { maxProducts: true, name: true } } },
+    });
+    const maxProducts = tenantPlan?.planRef?.maxProducts ?? Infinity;
+    let productCount = await this.prisma.product.count({ where: { tenantId } });
+
+    const resolveCategory = async (name: string): Promise<string | null> => {
+      if (!name) return null;
+      const key = name.toLowerCase();
+      if (catMap.has(key)) return catMap.get(key)!;
+      if (!options.createMissingCategories) return null;
+      const slug = name.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'CAT';
+      const created = await this.prisma.category.create({ data: { tenantId, name, slug: `${slug}_${Date.now().toString(36)}` } });
+      catMap.set(key, created.id);
+      return created.id;
+    };
+    const resolveZone = async (name: string): Promise<string | null> => {
+      if (!name) return null;
+      const key = name.toLowerCase();
+      if (zoneMap.has(key)) return zoneMap.get(key)!;
+      if (!options.createMissingZones) return null;
+      const created = await this.prisma.zone.create({ data: { tenantId, name } });
+      zoneMap.set(key, created.id);
+      return created.id;
+    };
+
+    let created = 0, updated = 0, skipped = 0;
+    const errors: { row: number; name: string; reason: string }[] = [];
+
+    for (let idx = 0; idx < dataRows.length; idx++) {
+      const row = dataRows[idx];
+      const rowNum = idx + 1 + (dto.hasHeaderRow ? 1 : 0);
+      const name = get(row, 'name');
+      if (!name) { skipped += 1; continue; }
+
+      try {
+        const barcode = get(row, 'barcode') || null;
+        const sku = get(row, 'sku') || null;
+        const cost = parseNumber(get(row, 'cost'));
+        const tax = get(row, 'tax') ? parseNumber(get(row, 'tax')) : 18;
+        const basePriceRaw = parseNumber(get(row, 'basePrice'));
+        const priceRaw = parseNumber(get(row, 'price'));
+        const { basePrice, taxPercentage, price } = this.resolvePricing({
+          basePrice: basePriceRaw > 0 ? basePriceRaw : undefined,
+          price: priceRaw > 0 ? priceRaw : undefined,
+          taxPercentage: tax,
+        });
+        const stock = Math.round(parseNumber(get(row, 'stock')));
+        const min = parseNumber(get(row, 'min'));
+        const uom = get(row, 'uom') || 'Unidad';
+        const categoryId = await resolveCategory(get(row, 'category'));
+        const zoneId = await resolveZone(get(row, 'zone'));
+
+        // Match: código de barra → SKU.
+        const existing = barcode
+          ? await this.prisma.product.findFirst({ where: { tenantId, barcode } })
+          : sku
+            ? await this.prisma.product.findFirst({ where: { tenantId, sku } })
+            : null;
+
+        if (existing) {
+          if (!options.updateExisting) { skipped += 1; continue; }
+          await this.prisma.product.update({
+            where: { id: existing.id },
+            data: {
+              name, barcode, basePrice, taxPercentage, price, cost, stock,
+              quantityMin: min, uom,
+              ...(categoryId ? { categoryId } : {}),
+              ...(zoneId ? { zoneId } : {}),
+            },
+          });
+          updated += 1;
+        } else {
+          if (productCount >= maxProducts) {
+            errors.push({ row: rowNum, name, reason: `Límite del plan alcanzado (${maxProducts} productos)` });
+            continue;
+          }
+          let finalSku = sku;
+          if (finalSku) {
+            const clash = await this.prisma.product.findFirst({ where: { tenantId, sku: finalSku } });
+            if (clash) finalSku = `${finalSku}-${Date.now().toString(36)}`;
+          } else {
+            finalSku = await this.generateSku(tenantId, name);
+          }
+          await this.prisma.product.create({
+            data: {
+              tenantId, name, barcode, sku: finalSku,
+              basePrice, taxPercentage, taxType: 'ITBIS', price, cost, stock,
+              quantityMin: min, uom, categoryId, zoneId,
+            },
+          });
+          created += 1;
+          productCount += 1;
+        }
+      } catch (e) {
+        errors.push({ row: rowNum, name, reason: e instanceof Error ? e.message : 'Error desconocido' });
+      }
+    }
+
+    return { created, updated, skipped, errorCount: errors.length, errors: errors.slice(0, 50), processed: dataRows.length };
+  }
+}
+
+const EXPORT_COLUMNS: SheetColumn[] = [
+  { header: 'SKU/Referencia', key: 'sku', width: 18 },
+  { header: 'Código de barra', key: 'barcode', width: 18 },
+  { header: 'Nombre', key: 'name', width: 34 },
+  { header: 'Categoría', key: 'category', width: 18 },
+  { header: 'Zona', key: 'zone', width: 16 },
+  { header: 'Costo', key: 'cost', width: 12 },
+  { header: 'Precio base', key: 'basePrice', width: 12 },
+  { header: 'ITBIS %', key: 'tax', width: 10 },
+  { header: 'Precio final', key: 'price', width: 12 },
+  { header: 'Stock', key: 'stock', width: 10 },
+  { header: 'Stock mínimo', key: 'min', width: 12 },
+  { header: 'Unidad', key: 'uom', width: 12 },
+];
+
+export const IMPORT_FIELDS = [
+  { value: 'name', label: 'Nombre' },
+  { value: 'sku', label: 'SKU / Referencia' },
+  { value: 'barcode', label: 'Código de barra' },
+  { value: 'category', label: 'Categoría' },
+  { value: 'zone', label: 'Zona' },
+  { value: 'cost', label: 'Costo' },
+  { value: 'basePrice', label: 'Precio base (sin ITBIS)' },
+  { value: 'price', label: 'Precio final (con ITBIS)' },
+  { value: 'tax', label: 'ITBIS %' },
+  { value: 'stock', label: 'Stock / Cantidad' },
+  { value: 'min', label: 'Stock mínimo' },
+  { value: 'uom', label: 'Unidad' },
+];
+
+/** Normaliza un texto numérico con posibles símbolos, miles y decimales (coma o punto). */
+function parseNumber(v: string): number {
+  if (!v) return 0;
+  let s = String(v).replace(/[^0-9.,-]/g, '').trim();
+  if (!s) return 0;
+  const hasComma = s.includes(','), hasDot = s.includes('.');
+  if (hasComma && hasDot) {
+    if (s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g, '').replace(',', '.');
+    else s = s.replace(/,/g, '');
+  } else if (hasComma) {
+    const parts = s.split(',');
+    if (parts.length === 2 && parts[1].length <= 2) s = s.replace(',', '.');
+    else s = s.replace(/,/g, '');
+  }
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+
+/** Adivina a qué campo corresponde un encabezado de columna. */
+function guessField(header: string): string {
+  const h = (header || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const has = (...keys: string[]) => keys.some((k) => h.includes(k));
+  if (has('barra', 'barcode', 'ean', 'upc')) return 'barcode';
+  if (has('sku', 'referencia', 'ref.', 'clave', 'codigo interno')) return 'sku';
+  if (has('categor', 'familia', 'rubro', 'grupo')) return 'category';
+  if (has('zona', 'ubicaci', 'localizaci', 'pasillo', 'estante', 'anaquel')) return 'zone';
+  if (has('costo', 'compra')) return 'cost';
+  if (has('base')) return 'basePrice';
+  if (has('itbis', 'impuesto', 'iva', 'tax')) return 'tax';
+  if (has('precio', 'venta', 'pvp')) return 'price';
+  if (has('minim')) return 'min';
+  if (has('stock', 'cantidad', 'existenc', 'inventario', 'exist', 'qty')) return 'stock';
+  if (has('unidad', 'medida', 'uom', 'um')) return 'uom';
+  if (has('nombre', 'descrip', 'producto', 'articulo', 'detalle')) return 'name';
+  return '';
 }

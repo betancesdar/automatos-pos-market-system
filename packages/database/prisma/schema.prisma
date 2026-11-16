@@ -22,6 +22,9 @@ model Tenant {
   expiresAt      DateTime
   // "DIRECT" = POS clásico (cobra quien factura) | "BILLER_CASHIER" = facturadores + caja central
   workflowMode   String   @default("DIRECT")
+  // Si el POS muestra los productos como grid con fotos (true) o como tabla
+  // compacta (ref/nombre/zona/stock) para inventarios grandes sin fotos (false).
+  showProductImages Boolean @default(true)
   // Atomic per-tenant invoice counter (replaces count()+1)
   invoiceCounter Int      @default(0)
   // Atomic per-tenant quote (cotización) counter

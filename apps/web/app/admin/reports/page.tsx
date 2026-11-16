@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../../lib/auth-context';
-import { apiFetch, LicenseBlockedError } from '../../../lib/api';
+import { apiFetch, apiDownload, LicenseBlockedError } from '../../../lib/api';
 import { formatCurrency } from '../../../lib/format';
 import { printDocument, escapeHtml } from '../../../lib/print';
 import { AdminShell, MetricCard, Card } from '../../../components/admin/AdminShell';
@@ -44,6 +44,23 @@ const PAYMENT_LABELS: Record<string, { label: string; icon: string; color: strin
   CARD: { label: 'Tarjeta', icon: '💳', color: 'bg-indigo-500' },
   TRANSFER: { label: 'Transferencia', icon: '🏦', color: 'bg-amber-500' },
 };
+
+interface DetailedRow { label: string; qty: number; salesCount: number; revenue: number; cost: number; profit: number; marginPct: number }
+interface DetailedReport {
+  groupBy: string;
+  period: { from: string; to: string };
+  rows: DetailedRow[];
+  totals: { qty: number; salesCount: number; revenue: number; cost: number; profit: number; marginPct: number };
+}
+const DIMENSIONS: { value: string; label: string }[] = [
+  { value: 'product', label: 'Producto' },
+  { value: 'category', label: 'Categoría' },
+  { value: 'zone', label: 'Zona' },
+  { value: 'payment', label: 'Forma de pago' },
+  { value: 'cashier', label: 'Cajero' },
+  { value: 'ncfType', label: 'Tipo de comprobante' },
+  { value: 'day', label: 'Día' },
+];
 
 const PRESETS: { id: RangePreset; label: string }[] = [
   { id: 'today', label: 'Hoy' },
@@ -92,6 +109,56 @@ export default function ReportsPage() {
   const [topProducts, setTopProducts] = useState<TopProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  // ── Constructor de reportes avanzado ──
+  const [dim, setDim] = useState('product');
+  const [fCat, setFCat] = useState('');
+  const [fZone, setFZone] = useState('');
+  const [fPayment, setFPayment] = useState('');
+  const [fCashier, setFCashier] = useState('');
+  const [detail, setDetail] = useState<DetailedReport | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [catOpts, setCatOpts] = useState<{ id: string; name: string }[]>([]);
+  const [zoneOpts, setZoneOpts] = useState<{ id: string; name: string }[]>([]);
+  const [cashierOpts, setCashierOpts] = useState<{ id: string; name: string }[]>([]);
+
+  // Opciones de filtro (mejor esfuerzo: si falta permiso, el filtro queda vacío).
+  useEffect(() => {
+    if (!tenantId) return;
+    apiFetch<{ id: string; name: string }[]>('/categories', tenantId).then(setCatOpts).catch(() => {});
+    apiFetch<{ id: string; name: string }[]>('/zones', tenantId).then(setZoneOpts).catch(() => {});
+    apiFetch<{ id: string; name: string; role?: string }[]>('/users', tenantId)
+      .then((us) => setCashierOpts(us.filter((u) => !u.role || ['CASHIER', 'ADMIN', 'BILLER'].includes(u.role))))
+      .catch(() => {});
+  }, [tenantId]);
+
+  const detailQuery = useCallback(() => {
+    const { from, to } = resolveRange(preset, customFrom, customTo);
+    const qs = new URLSearchParams({ from, to, groupBy: dim });
+    if (fCat) qs.set('categoryId', fCat);
+    if (fZone) qs.set('zoneId', fZone);
+    if (fPayment) qs.set('paymentMethod', fPayment);
+    if (fCashier) qs.set('cashierId', fCashier);
+    return qs.toString();
+  }, [preset, customFrom, customTo, dim, fCat, fZone, fPayment, fCashier]);
+
+  const fetchDetail = useCallback(async () => {
+    if (!tenantId) return;
+    if (preset === 'custom' && (!customFrom || !customTo)) return;
+    setDetailLoading(true);
+    try {
+      setDetail(await apiFetch<DetailedReport>(`/reports/detailed?${detailQuery()}`, tenantId));
+    } catch (err) {
+      if (err instanceof LicenseBlockedError) setLicenseBlocked(err.message);
+    } finally { setDetailLoading(false); }
+  }, [tenantId, preset, customFrom, customTo, detailQuery, setLicenseBlocked]);
+
+  useEffect(() => { fetchDetail(); }, [fetchDetail]);
+
+  const exportDetail = async (format: 'csv' | 'xlsx') => {
+    try { await apiDownload(`/reports/detailed/export?format=${format}&${detailQuery()}`, tenantId, `reporte.${format}`); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Error al exportar'); }
+  };
 
   const fetchReports = useCallback(async () => {
     if (!tenantId) return;
@@ -273,6 +340,111 @@ export default function ReportsPage() {
             </table>
           </div>
         </div>
+      </section>
+
+      {/* ── Constructor de reportes avanzado ── */}
+      <section>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-bold text-slate-900">🔎 Reporte avanzado</h2>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-slate-500">Exportar:</span>
+            <button onClick={() => exportDetail('csv')} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">CSV</button>
+            <button onClick={() => exportDetail('xlsx')} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">Excel</button>
+          </div>
+        </div>
+
+        <Card>
+          <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-500">Agrupar por</label>
+              <select value={dim} onChange={(e) => setDim(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                {DIMENSIONS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-500">Categoría</label>
+              <select value={fCat} onChange={(e) => setFCat(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                <option value="">Todas</option>
+                {catOpts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-500">Zona</label>
+              <select value={fZone} onChange={(e) => setFZone(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                <option value="">Todas</option>
+                {zoneOpts.map((z) => <option key={z.id} value={z.id}>{z.name}</option>)}
+                <option value="NONE">Sin zona</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-500">Forma de pago</label>
+              <select value={fPayment} onChange={(e) => setFPayment(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                <option value="">Todas</option>
+                <option value="CASH">Efectivo</option>
+                <option value="CARD">Tarjeta</option>
+                <option value="TRANSFER">Transferencia</option>
+                <option value="CREDIT">Crédito</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-500">Cajero</label>
+              <select value={fCashier} onChange={(e) => setFCashier(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                <option value="">Todos</option>
+                {cashierOpts.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50 text-slate-500">
+                  <th className="px-4 py-3 text-left font-semibold">{DIMENSIONS.find((d) => d.value === dim)?.label}</th>
+                  <th className="px-4 py-3 text-right font-semibold">Cantidad</th>
+                  <th className="px-4 py-3 text-right font-semibold">Ventas</th>
+                  <th className="px-4 py-3 text-right font-semibold">Ingresos</th>
+                  <th className="px-4 py-3 text-right font-semibold">Costo</th>
+                  <th className="px-4 py-3 text-right font-semibold">Ganancia</th>
+                  <th className="px-4 py-3 text-right font-semibold">Margen</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detailLoading && <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-400">Calculando…</td></tr>}
+                {!detailLoading && (!detail || detail.rows.length === 0) && (
+                  <tr><td colSpan={7} className="px-4 py-10 text-center text-slate-400">Sin datos para los filtros seleccionados.</td></tr>
+                )}
+                {!detailLoading && detail?.rows.map((r, i) => (
+                  <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
+                    <td className="px-4 py-2.5 font-medium text-slate-800">{r.label}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">{r.qty % 1 === 0 ? r.qty : r.qty.toFixed(2)}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-slate-500">{r.salesCount}</td>
+                    <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-emerald-600">{formatCurrency(r.revenue)}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-red-600">{formatCurrency(r.cost)}</td>
+                    <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-slate-700">{formatCurrency(r.profit)}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-bold tabular-nums ${
+                        r.marginPct >= 30 ? 'bg-emerald-100 text-emerald-700' : r.marginPct >= 15 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
+                      }`}>{r.marginPct.toFixed(1)}%</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              {!detailLoading && detail && detail.rows.length > 0 && (
+                <tfoot>
+                  <tr className="border-t-2 border-slate-200 bg-slate-50 font-bold text-slate-800">
+                    <td className="px-4 py-3">TOTAL ({detail.totals.salesCount} venta{detail.totals.salesCount === 1 ? '' : 's'})</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{detail.totals.qty % 1 === 0 ? detail.totals.qty : detail.totals.qty.toFixed(2)}</td>
+                    <td className="px-4 py-3" />
+                    <td className="px-4 py-3 text-right tabular-nums text-emerald-700">{formatCurrency(detail.totals.revenue)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-red-700">{formatCurrency(detail.totals.cost)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{formatCurrency(detail.totals.profit)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{detail.totals.marginPct.toFixed(1)}%</td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </Card>
       </section>
     </AdminShell>
   );

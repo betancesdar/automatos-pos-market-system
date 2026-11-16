@@ -42,6 +42,7 @@ class UpdateTenantDto {
   plan?: string;
   planCode?: string;
   workflowMode?: string; // "DIRECT" | "BILLER_CASHIER"
+  showProductImages?: boolean; // POS: grid con fotos (true) o tabla compacta (false)
   expiresAt?: string; // ISO date string
 }
 

@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../../lib/auth-context';
-import { apiFetch, LicenseBlockedError } from '../../../lib/api';
+import { apiFetch, apiDownload, LicenseBlockedError } from '../../../lib/api';
 import { formatCurrency } from '../../../lib/format';
 import { AdminShell, Card } from '../../../components/admin/AdminShell';
+import { ImportInventoryModal } from '../../../components/admin/ImportInventoryModal';
 import type { Category } from '../../../lib/pos-types';
 
 type ProductType = 'PRODUCT' | 'SERVICE' | 'COMBO';
@@ -97,6 +98,11 @@ function computeFinalPrice(basePrice: number, taxPercentage: number): number {
   return parseFloat(((basePrice || 0) * (1 + (taxPercentage || 0) / 100)).toFixed(2));
 }
 
+/** Escapa texto para interpolar seguro en el HTML de impresión. */
+function esc(s: string): string {
+  return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
+}
+
 export default function InventoryPage() {
   const { user, setLicenseBlocked } = useAuth();
   const tenantId = user?.tenantId ?? '';
@@ -120,6 +126,35 @@ export default function InventoryPage() {
   const [categoryForm, setCategoryForm] = useState<{ id: string; name: string; description: string } | null>(null);
   const [savingCategory, setSavingCategory] = useState(false);
   const [categoryError, setCategoryError] = useState('');
+
+  // Import / export inventario
+  const [showImport, setShowImport] = useState(false);
+  const [exporting, setExporting] = useState('');
+
+  const exportInventory = async (fmt: 'csv' | 'xlsx') => {
+    setExporting(fmt);
+    try { await apiDownload(`/catalog/export?format=${fmt}`, tenantId, `inventario.${fmt}`); }
+    catch (e) { alert(e instanceof Error ? e.message : 'Error al exportar'); }
+    finally { setExporting(''); }
+  };
+
+  const printInventoryPdf = () => {
+    const w = window.open('', '_blank', 'width=1000,height=800');
+    if (!w) return;
+    const rows = filteredProducts.map((p) => `<tr>
+      <td>${esc(p.sku ?? p.barcode ?? '')}</td><td>${esc(p.name)}</td>
+      <td>${esc(p.category?.name ?? '')}</td><td>${esc(p.zone?.name ?? '')}</td>
+      <td style="text-align:right">${formatCurrency(p.price)}</td>
+      <td style="text-align:right">${p.stock}</td></tr>`).join('');
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Inventario</title>
+      <style>body{font-family:Arial,sans-serif;padding:24px;color:#111}h1{font-size:18px}
+      table{width:100%;border-collapse:collapse;font-size:12px;margin-top:12px}
+      th,td{border:1px solid #ccc;padding:6px 8px;text-align:left}th{background:#f1f5f9}</style></head>
+      <body><h1>Inventario — ${new Date().toLocaleDateString('es-DO')}</h1>
+      <table><thead><tr><th>Referencia</th><th>Nombre</th><th>Categoría</th><th>Zona</th><th>Precio</th><th>Stock</th></tr></thead>
+      <tbody>${rows}</tbody></table><script>window.print()</script></body></html>`);
+    w.document.close();
+  };
 
   const load = useCallback(async () => {
     if (!tenantId) return;
@@ -332,12 +367,26 @@ export default function InventoryPage() {
                 <option value="NONE">Sin zona</option>
               </select>
             </div>
-            <button
-              onClick={openNewProduct}
-              className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
-            >
-              + Agregar Producto
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs">
+                <span className="px-1 font-semibold text-slate-500">Exportar:</span>
+                <button onClick={() => exportInventory('csv')} disabled={exporting !== ''} className="rounded-md px-2 py-1 font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50">{exporting === 'csv' ? '…' : 'CSV'}</button>
+                <button onClick={() => exportInventory('xlsx')} disabled={exporting !== ''} className="rounded-md px-2 py-1 font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50">{exporting === 'xlsx' ? '…' : 'Excel'}</button>
+                <button onClick={printInventoryPdf} className="rounded-md px-2 py-1 font-medium text-slate-600 hover:bg-slate-100">PDF</button>
+              </div>
+              <button
+                onClick={() => setShowImport(true)}
+                className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
+              >
+                ⬆ Importar
+              </button>
+              <button
+                onClick={openNewProduct}
+                className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
+              >
+                + Agregar Producto
+              </button>
+            </div>
           </div>
 
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -553,6 +602,14 @@ export default function InventoryPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {showImport && (
+        <ImportInventoryModal
+          tenantId={tenantId}
+          onClose={() => setShowImport(false)}
+          onDone={() => { setShowImport(false); load(); }}
+        />
       )}
     </AdminShell>
   );

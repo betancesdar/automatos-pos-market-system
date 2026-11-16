@@ -124,6 +124,8 @@ export default function POSPage() {
   // El carrito es el protagonista; el inventario vive en un panel flotante
   // que se abre con el botón «Productos» (o F1).
   const [showProducts, setShowProducts] = useState(false);
+  // Config del comercio: mostrar productos con foto (grid) o como tabla compacta.
+  const [showProductImages, setShowProductImages] = useState(true);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [scannedBarcode, setScannedBarcode] = useState('');
@@ -291,11 +293,22 @@ export default function POSPage() {
       if (cached === 'DIRECT' || cached === 'BILLER_CASHIER') setWorkflowMode(cached);
     } catch { /* localStorage unavailable — ignore */ }
 
-    apiFetch<{ workflowMode?: string }>('/tenant', tenantId)
+    try {
+      const cachedImg = window.localStorage.getItem(`mm_showimg_${tenantId}`);
+      if (cachedImg === '0') setShowProductImages(false);
+      else if (cachedImg === '1') setShowProductImages(true);
+    } catch { /* ignore */ }
+
+    apiFetch<{ workflowMode?: string; showProductImages?: boolean }>('/tenant', tenantId)
       .then((t) => {
         const mode: WorkflowMode = t.workflowMode === 'BILLER_CASHIER' ? 'BILLER_CASHIER' : 'DIRECT';
         setWorkflowMode(mode);
-        try { window.localStorage.setItem(`mm_workflow_${tenantId}`, mode); } catch { /* ignore */ }
+        const showImg = t.showProductImages !== false;
+        setShowProductImages(showImg);
+        try {
+          window.localStorage.setItem(`mm_workflow_${tenantId}`, mode);
+          window.localStorage.setItem(`mm_showimg_${tenantId}`, showImg ? '1' : '0');
+        } catch { /* ignore */ }
       })
       .catch(() => { /* offline — keep cached mode */ });
   }, [tenantId]);
@@ -930,7 +943,7 @@ export default function POSPage() {
               <p className="py-20 text-center text-slate-400">Cargando productos…</p>
             ) : products.length === 0 ? (
               <p className="py-20 text-center text-slate-400">No hay productos en esta categoría</p>
-            ) : (
+            ) : showProductImages ? (
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
                 {products.map((p) => (
                   <button
@@ -953,6 +966,36 @@ export default function POSPage() {
                     </div>
                   </button>
                 ))}
+              </div>
+            ) : (
+              // Modo tabla compacta (sin fotos): referencia · nombre · zona · stock · precio.
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-slate-50 text-xs uppercase text-slate-500">
+                    <tr>
+                      <th className="px-3 py-2 text-left">Ref.</th>
+                      <th className="px-3 py-2 text-left">Producto</th>
+                      <th className="px-2 py-2 text-left">Zona</th>
+                      <th className="px-2 py-2 text-right">Cant.</th>
+                      <th className="px-3 py-2 text-right">Precio</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {products.map((p) => (
+                      <tr
+                        key={p.id}
+                        onClick={() => { if (p.stock > 0) addToCart(p); }}
+                        className={`border-b border-slate-100 ${p.stock <= 0 ? 'opacity-40' : 'cursor-pointer hover:bg-indigo-50'}`}
+                      >
+                        <td className="px-3 py-2 font-mono text-xs text-slate-500">{p.sku ?? p.barcode ?? '—'}</td>
+                        <td className="px-3 py-2 font-medium text-slate-800">{p.name}</td>
+                        <td className="px-2 py-2 text-xs text-slate-500">{p.zone?.name ?? '—'}</td>
+                        <td className="px-2 py-2 text-right tabular-nums text-slate-600">{p.stock}</td>
+                        <td className="px-3 py-2 text-right font-semibold tabular-nums text-indigo-600">RD$ {p.price.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>

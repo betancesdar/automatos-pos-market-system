@@ -36,6 +36,7 @@ interface UpdateTenantInput {
   plan?: string;
   planCode?: string;
   workflowMode?: string;
+  showProductImages?: boolean;
   expiresAt?: Date;
 }
 
@@ -229,6 +230,7 @@ export class SuperadminService {
         plan: data.plan,
         planCode: data.planCode,
         workflowMode: data.workflowMode,
+        showProductImages: data.showProductImages,
         expiresAt: data.expiresAt,
       },
     });

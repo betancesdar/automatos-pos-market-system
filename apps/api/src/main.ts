@@ -4,12 +4,16 @@ import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+import { json, urlencoded } from 'express';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   app.use(cookieParser(process.env.COOKIE_SECRET));
+  // Importar inventario envía la matriz de filas como JSON: subir el límite.
+  app.use(json({ limit: '15mb' }));
+  app.use(urlencoded({ extended: true, limit: '15mb' }));
 
   // whitelist stays off until every legacy DTO carries validation decorators;
   // DTOs without decorators pass through unchanged instead of being emptied.

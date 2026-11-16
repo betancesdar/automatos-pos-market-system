@@ -74,6 +74,7 @@ export function TenantDetailDrawer({
   const [plans, setPlans] = useState<PlanRow[]>([]);
   const [planCode, setPlanCode] = useState('');
   const [workflowMode, setWorkflowMode] = useState('DIRECT');
+  const [showProductImages, setShowProductImages] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const flash = (m: string) => { setNotice(m); setTimeout(() => setNotice(''), 3500); };
@@ -110,7 +111,7 @@ export function TenantDetailDrawer({
     try {
       const [planList, tenantRow] = await Promise.all([
         superadminFetch<PlanRow[]>('/superadmin/plans'),
-        superadminFetch<{ planCode?: string | null; workflowMode?: string }[]>('/superadmin/tenants').then(
+        superadminFetch<{ planCode?: string | null; workflowMode?: string; showProductImages?: boolean }[]>('/superadmin/tenants').then(
           (rows: any[]) => rows.find((r) => r.id === tenant.id),
         ),
       ]);
@@ -118,6 +119,7 @@ export function TenantDetailDrawer({
       if (tenantRow) {
         setPlanCode(tenantRow.planCode ?? '');
         setWorkflowMode(tenantRow.workflowMode ?? 'DIRECT');
+        setShowProductImages(tenantRow.showProductImages !== false);
       }
     } catch (e) { fail(e, 'Error cargando planes'); }
   }, [tenant.id]);
@@ -183,6 +185,7 @@ export function TenantDetailDrawer({
         body: JSON.stringify({
           planCode: planCode || undefined,
           workflowMode,
+          showProductImages,
         }),
       });
       flash('Plan y modo de operación guardados');
@@ -396,6 +399,22 @@ export function TenantDetailDrawer({
                     }`}>
                     <p className="font-bold text-white">Facturador + Caja</p>
                     <p className="text-xs text-slate-400">Facturadores arman pedidos (#código) y el cliente paga en caja central</p>
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-4">
+                <p className="mb-3 text-xs font-bold uppercase text-slate-500">Visualización de productos en el POS</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <button onClick={() => setShowProductImages(true)}
+                    className={`rounded-xl border p-4 text-left ${showProductImages ? 'border-violet-500 bg-violet-950' : 'border-slate-700'}`}>
+                    <p className="font-bold text-white">🖼️ Con fotos (grid)</p>
+                    <p className="text-xs text-slate-400">Ideal para inventarios pequeños con imágenes</p>
+                  </button>
+                  <button onClick={() => setShowProductImages(false)}
+                    className={`rounded-xl border p-4 text-left ${!showProductImages ? 'border-violet-500 bg-violet-950' : 'border-slate-700'}`}>
+                    <p className="font-bold text-white">📋 Tabla compacta</p>
+                    <p className="text-xs text-slate-400">Referencia · nombre · zona · cantidad — para inventarios grandes sin fotos</p>
                   </button>
                 </div>
               </div>

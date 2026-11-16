@@ -71,8 +71,10 @@ export interface PosProduct {
   price: number;
   stock: number;
   barcode: string | null;
+  sku?: string | null;
   imageUrl: string | null;
   category?: { id: string; name: string; slug: string } | null;
+  zone?: { id: string; name: string } | null;
 }
 
 export interface CashSession {
