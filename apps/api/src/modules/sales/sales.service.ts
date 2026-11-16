@@ -244,8 +244,8 @@ export class SalesService {
         }
       }
 
-      // Sequential per-tenant invoice number (e.g. INV-00001), from an atomic
-      // counter — count()+1 collided under concurrency and broke on deletes.
+      // Número de factura secuencial por comercio (ej. 000001), desde un contador
+      // atómico — count()+1 chocaba en concurrencia y se rompía con borrados.
       const invoiceRows = await tx.$queryRaw<{ invoiceCounter: number }[]>`
         UPDATE "Tenant" SET "invoiceCounter" = "invoiceCounter" + 1
         WHERE id = ${tenantId}
@@ -253,7 +253,8 @@ export class SalesService {
       if (!invoiceRows.length) {
         throw new BadRequestException('Tenant not found');
       }
-      const invoiceNumber = `INV-${String(invoiceRows[0].invoiceCounter).padStart(5, '0')}`;
+      // Número secuencial simple (sin prefijo "INV-"), con relleno a 6 dígitos.
+      const invoiceNumber = String(invoiceRows[0].invoiceCounter).padStart(6, '0');
 
       let ncf: string | null = null;
       if (NCF_GENERATING_TYPES.includes(data.ncfType)) {

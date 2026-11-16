@@ -69,6 +69,9 @@ export function TenantDetailDrawer({
   const [ecfForm, setEcfForm] = useState({ enabled: false, pronesoftBusinessId: '' });
   const [associated, setAssociated] = useState<{ id: string; name: string; rnc: string }[]>([]);
   const [ecfSeqs, setEcfSeqs] = useState<unknown[] | null>(null);
+  // Formulario para registrar una secuencia e-NCF autorizada por la DGII.
+  const [ecfSeqForm, setEcfSeqForm] = useState({ type: 'E32', from: '', to: '', expiration: '' });
+  const [ecfSeqSaving, setEcfSeqSaving] = useState(false);
 
   // Plan & modo
   const [plans, setPlans] = useState<PlanRow[]>([]);
@@ -174,6 +177,32 @@ export function TenantDetailDrawer({
       loadFiscal();
     } catch (e) { fail(e, 'Error guardando e-CF'); }
     finally { setSaving(false); }
+  };
+
+  /** Registra en Pronesoft una secuencia e-NCF autorizada por la DGII para este comercio. */
+  const saveEcfSequence = async () => {
+    const from = parseInt(ecfSeqForm.from, 10);
+    const to = parseInt(ecfSeqForm.to, 10);
+    if (!ecfSeqForm.type || isNaN(from) || isNaN(to) || to < from) {
+      setError('Indica tipo, desde y hasta (hasta ≥ desde).');
+      return;
+    }
+    setEcfSeqSaving(true);
+    setError('');
+    try {
+      await superadminFetch(`/superadmin/tenants/${tenant.id}/ecf/sequences`, {
+        method: 'POST',
+        body: JSON.stringify({
+          type: ecfSeqForm.type,
+          from, to,
+          ...(ecfSeqForm.expiration ? { expiration: ecfSeqForm.expiration } : {}),
+        }),
+      });
+      flash('Secuencia e-NCF registrada en Pronesoft');
+      setEcfSeqForm({ type: ecfSeqForm.type, from: '', to: '', expiration: '' });
+      try { setEcfSeqs((await superadminFetch<{ data?: unknown[] }>(`/superadmin/tenants/${tenant.id}/ecf/sequences`)).data ?? []); } catch { /* ignore */ }
+    } catch (e) { fail(e, 'Error registrando la secuencia'); }
+    finally { setEcfSeqSaving(false); }
   };
 
   const savePlanAndMode = async () => {
@@ -371,7 +400,42 @@ export function TenantDetailDrawer({
                             {JSON.stringify(ecfSeqs, null, 1)}
                           </pre>
                         )}
-                        <p className="mt-1 text-[11px] text-slate-500">Las secuencias de producción se crean con el rango de e-NCF que te entrega el comercio (autorizado por la DGII).</p>
+
+                        {/* Registrar una secuencia e-NCF autorizada por la DGII */}
+                        <div className="mt-3 rounded-lg border border-slate-700 bg-slate-800/40 p-3">
+                          <p className="mb-2 text-[11px] font-bold uppercase text-slate-500">Registrar secuencia autorizada</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="col-span-2">
+                              <label className="mb-1 block text-[11px] text-slate-400">Tipo de e-CF</label>
+                              <select value={ecfSeqForm.type} onChange={(e) => setEcfSeqForm({ ...ecfSeqForm, type: e.target.value })} className={input}>
+                                <option value="E32">E32 — Consumo</option>
+                                <option value="E31">E31 — Crédito Fiscal</option>
+                                <option value="E45">E45 — Gubernamental</option>
+                                <option value="E34">E34 — Nota de Crédito</option>
+                                <option value="E33">E33 — Nota de Débito</option>
+                                <option value="E44">E44 — Régimen Especial</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-[11px] text-slate-400">Desde (nº)</label>
+                              <input type="number" min={1} value={ecfSeqForm.from} onChange={(e) => setEcfSeqForm({ ...ecfSeqForm, from: e.target.value })} placeholder="1" className={input} />
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-[11px] text-slate-400">Hasta (nº)</label>
+                              <input type="number" min={1} value={ecfSeqForm.to} onChange={(e) => setEcfSeqForm({ ...ecfSeqForm, to: e.target.value })} placeholder="1000" className={input} />
+                            </div>
+                            <div className="col-span-2">
+                              <label className="mb-1 block text-[11px] text-slate-400">Vencimiento (opcional)</label>
+                              <input type="date" value={ecfSeqForm.expiration} onChange={(e) => setEcfSeqForm({ ...ecfSeqForm, expiration: e.target.value })} className={input} />
+                            </div>
+                          </div>
+                          <button onClick={saveEcfSequence} disabled={ecfSeqSaving}
+                            className="mt-2 w-full rounded-lg bg-violet-600 px-3 py-2 text-xs font-bold text-white hover:bg-violet-500 disabled:opacity-50">
+                            {ecfSeqSaving ? 'Registrando…' : 'Registrar secuencia e-NCF'}
+                          </button>
+                        </div>
+
+                        <p className="mt-2 text-[11px] text-slate-500">La secuencia es el rango de e-NCF que la <b>DGII autoriza al comercio</b> (ej. del 1 al 1000 para E32). Sin una secuencia disponible, Pronesoft no puede asignar el e-NCF y la factura fiscal falla.</p>
                       </div>
                     )}
                   </>
