@@ -27,3 +27,41 @@ a {
   color: inherit;
   text-decoration: none;
 }
+
+/* ── Landing page motion (app/page.tsx) ── */
+@keyframes blob-float {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(30px, -40px) scale(1.08); }
+  66% { transform: translate(-25px, 25px) scale(0.95); }
+}
+@keyframes soft-float {
+  0%, 100% { transform: translateY(0px) rotate(var(--tilt, 0deg)); }
+  50% { transform: translateY(-14px) rotate(var(--tilt, 0deg)); }
+}
+@keyframes marquee-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+@keyframes grid-pan {
+  0% { background-position: 0 0; }
+  100% { background-position: 48px 48px; }
+}
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.animate-blob { animation: blob-float 16s ease-in-out infinite; }
+.animate-blob-delay { animation: blob-float 20s ease-in-out infinite; animation-delay: -6s; }
+.animate-blob-delay-2 { animation: blob-float 24s ease-in-out infinite; animation-delay: -12s; }
+.animate-soft-float { animation: soft-float 5s ease-in-out infinite; }
+.animate-marquee { animation: marquee-scroll 36s linear infinite; }
+.animate-grid-pan { animation: grid-pan 10s linear infinite; }
+.animate-pulse-glow { animation: pulse-glow 2.4s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-blob, .animate-blob-delay, .animate-blob-delay-2,
+  .animate-soft-float, .animate-marquee, .animate-grid-pan, .animate-pulse-glow {
+    animation: none;
+  }
+}
