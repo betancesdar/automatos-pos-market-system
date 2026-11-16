@@ -909,17 +909,21 @@ export default function POSPage() {
       )}
 
       <div className="relative flex min-h-0 flex-1">
-        {/* Panel FLOTANTE de productos / inventario (35% de la pantalla).
+        {/* Drawer FLOTANTE de productos / inventario — fijo sobre toda la pantalla,
+            responsive: hoja completa en móvil, panel lateral flotante en desktop.
             El carrito es el protagonista; aquí solo se buscan y agregan productos. */}
         {showProducts && (
-        <div className="absolute inset-0 z-30 flex">
-        <div className="flex w-[35%] min-w-[360px] flex-col border-r border-slate-200 bg-slate-50 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex justify-end sm:p-4">
+          {/* Fondo: cierra tocando fuera */}
+          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[1px]" onClick={() => setShowProducts(false)} />
+          {/* Panel flotante */}
+          <div className="relative z-10 flex h-full w-full flex-col overflow-hidden bg-slate-50 shadow-2xl sm:w-[460px] sm:rounded-2xl lg:w-[42%] lg:max-w-[640px]">
           <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
             <div>
               <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700">📦 Productos / Inventario</h2>
               <p className="text-xs text-slate-400">Toca un producto para agregarlo al carrito</p>
             </div>
-            <button onClick={() => setShowProducts(false)} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50">
+            <button onClick={() => setShowProducts(false)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50">
               ✕ Cerrar
             </button>
           </div>
@@ -976,7 +980,7 @@ export default function POSPage() {
             ) : products.length === 0 ? (
               <p className="py-20 text-center text-slate-400">No hay productos en esta categoría</p>
             ) : showProductImages ? (
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {products.map((p) => (
                   <button
                     key={p.id}
@@ -1032,9 +1036,7 @@ export default function POSPage() {
             )}
           </div>
 
-        </div>
-        {/* Backdrop: cierra el panel tocando fuera */}
-        <div className="flex-1 bg-slate-900/20" onClick={() => setShowProducts(false)} />
+          </div>
         </div>
         )}
 
