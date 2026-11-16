@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   minimarket_postgres_prod:
     image: postgres:15-alpine
@@ -31,8 +29,9 @@ services:
       dockerfile: apps/api/Dockerfile
     container_name: minimarket_api_prod
     restart: always
-    ports:
-      - "4000:4000"
+    # Sin puerto público: Caddy llega por la red interna (minimarket_public).
+    expose:
+      - "4000"
     environment:
       NODE_ENV: production
       PORT: 4000
@@ -43,6 +42,8 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       COOKIE_SECRET: ${COOKIE_SECRET}
+      # Clave independiente para cifrar los secretos de Pronesoft (e-CF).
+      ECF_SECRET_KEY: ${ECF_SECRET_KEY}
       CORS_ORIGINS: ${CORS_ORIGINS}
     depends_on:
       - minimarket_postgres_prod
@@ -60,8 +61,9 @@ services:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
     container_name: minimarket_web_prod
     restart: always
-    ports:
-      - "3000:3000"
+    # Sin puerto público: Caddy llega por la red interna (minimarket_public).
+    expose:
+      - "3000"
     environment:
       NODE_ENV: production
       JWT_SECRET: ${JWT_SECRET}
