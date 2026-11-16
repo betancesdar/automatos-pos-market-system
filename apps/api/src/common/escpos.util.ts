@@ -50,6 +50,7 @@ interface SaleReceiptData {
   ncf: string | null;
   ncfType: string;
   clientRnc: string | null;
+  clientName?: string | null;
   applyItbis: boolean;
   itbis: number;
   paymentMethod: string;
@@ -75,7 +76,8 @@ export function buildSaleReceipt(sale: SaleReceiptData): string {
   if (sale.ncf) {
     receipt += `NCF: ${sale.ncf}\n`;
     receipt += `Tipo: ${sale.ncfType}\n`;
-    if (sale.clientRnc) receipt += `Cliente RNC: ${sale.clientRnc}\n`;
+    if (sale.clientName) receipt += `Cliente: ${sale.clientName}\n`;
+    if (sale.clientRnc) receipt += `RNC/Ced: ${sale.clientRnc}\n`;
   }
   if (sale.applyItbis) receipt += `ITBIS: RD$ ${sale.itbis.toFixed(2)}\n`;
   receipt += `Pago: ${sale.paymentMethod}\n`;

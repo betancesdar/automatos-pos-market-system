@@ -134,6 +134,8 @@ export default function POSPage() {
   const [receiptType, setReceiptType] = useState<ReceiptTypeValue>('VENTA_RAPIDA');
   const [applyItbis, setApplyItbis] = useState(false);
   const [clientRnc, setClientRnc] = useState('');
+  const [clientName, setClientName] = useState('');
+  const [rncLookup, setRncLookup] = useState<'idle' | 'loading' | 'found' | 'notfound'>('idle');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CASH');
   const [cashReceived, setCashReceived] = useState('');
   const [showCheckout, setShowCheckout] = useState(false);
@@ -331,6 +333,7 @@ export default function POSPage() {
     const orderNcf = RECEIPT_TYPES.find((r) => r.value === order.ncfType);
     if (orderNcf) setReceiptType(orderNcf.value);
     setClientRnc(order.clientRnc ?? '');
+    setClientName(order.clientName ?? '');
   };
 
   const clearActiveOrder = () => {
@@ -338,6 +341,7 @@ export default function POSPage() {
     setCart([]);
     setDiscountAmount(0);
     setClientRnc('');
+    setClientName('');
   };
 
   useEffect(() => {
@@ -407,6 +411,7 @@ export default function POSPage() {
     ncfType: receiptType,
     applyItbis,
     clientRnc: receiptConfig.needsRnc ? clientRnc : undefined,
+    clientName: receiptConfig.needsRnc && clientName.trim() ? clientName.trim() : undefined,
     paymentMethod,
     discountAmount: discountAmount > 0 ? discountAmount : undefined,
   });
@@ -417,6 +422,8 @@ export default function POSPage() {
     setShowCheckout(false);
     setCashReceived('');
     setClientRnc('');
+    setClientName('');
+    setRncLookup('idle');
   };
 
   /**
@@ -446,6 +453,8 @@ export default function POSPage() {
       invoiceNumber: null,
       ncf: null,
       ncfType: null,
+      clientName: receiptConfig.needsRnc && clientName.trim() ? clientName.trim() : null,
+      clientRnc: receiptConfig.needsRnc && clientRnc.trim() ? clientRnc.trim() : null,
       date: new Date(),
       cashierName: user?.name,
       items: cart.map((i) => ({
@@ -478,6 +487,8 @@ export default function POSPage() {
       ncf?: string | null;
       ncfType?: string | null;
       invoiceNumber?: string | null;
+      clientName?: string | null;
+      clientRnc?: string | null;
       total: number;
       subtotal: number;
       itbis: number;
@@ -541,6 +552,7 @@ export default function POSPage() {
               ncfType: receiptType,
               applyItbis,
               clientRnc: receiptConfig.needsRnc ? clientRnc : undefined,
+              clientName: receiptConfig.needsRnc && clientName.trim() ? clientName.trim() : undefined,
               discountAmount: discountAmount > 0 ? discountAmount : undefined,
             }),
           },
@@ -619,6 +631,8 @@ export default function POSPage() {
           invoiceNumber: data.sale.invoiceNumber,
           ncf: data.sale.ncf,
           ncfType: data.sale.ncfType,
+          clientName: data.sale.clientName,
+          clientRnc: data.sale.clientRnc,
           date: new Date(data.sale.createdAt),
           cashierName: user?.name,
           items: data.sale.items.map((item) => ({
@@ -663,6 +677,24 @@ export default function POSPage() {
   const focusClientRnc = () => {
     setReceiptType('CREDITO_FISCAL');
     requestAnimationFrame(() => clientRncRef.current?.focus());
+  };
+
+  /** Consulta el RNC/Cédula en la DGII y autocompleta el nombre del cliente. */
+  const lookupClientRnc = async (raw: string) => {
+    const clean = raw.replace(/\D/g, '');
+    if (clean.length !== 9 && clean.length !== 11) { setRncLookup('idle'); return; }
+    setRncLookup('loading');
+    try {
+      const data = await apiFetch<{ found: boolean; name?: string }>(`/ecf/rnc-lookup/${clean}`, tenantId);
+      if (data.found && data.name) {
+        setClientName(data.name);
+        setRncLookup('found');
+      } else {
+        setRncLookup('notfound');
+      }
+    } catch {
+      setRncLookup('notfound');
+    }
   };
 
   const focusLineQuantity = () => {
@@ -1000,17 +1032,6 @@ export default function POSPage() {
             )}
           </div>
 
-          {/* Shortcut bar */}
-          <div className="flex flex-wrap gap-2 border-t border-slate-200 bg-white px-4 py-2">
-            {[
-              ['F1', 'Buscar'], ['F2', 'Cliente'], ['F3', 'Descuento'],
-              ['F4', 'Cantidad'], ['F5', 'Borrar'],
-            ].map(([key, label]) => (
-              <span key={key} className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs text-slate-500">
-                <kbd className="font-bold text-slate-700">{key}</kbd> — {label}
-              </span>
-            ))}
-          </div>
         </div>
         {/* Backdrop: cierra el panel tocando fuera */}
         <div className="flex-1 bg-slate-900/20" onClick={() => setShowProducts(false)} />
@@ -1019,20 +1040,12 @@ export default function POSPage() {
 
         {/* CARRITO — protagonista, ocupa todo el ancho disponible */}
         <div className="flex min-w-0 flex-1 flex-col bg-white">
-          <div className="border-b border-slate-200 px-4 py-3">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700">
-                  {isBiller ? 'Pedido para Caja' : 'Carrito de Venta'}
-                </h2>
-                <p className="text-xs text-slate-400">{cart.length} artículo(s)</p>
-              </div>
-              <button
-                onClick={() => { setShowProducts(true); requestAnimationFrame(() => searchRef.current?.focus()); }}
-                className="shrink-0 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-indigo-500"
-              >
-                📦 Productos <span className="font-normal text-indigo-200">(F1)</span>
-              </button>
+          <div className="shrink-0 border-b border-slate-200 px-4 pb-2 pt-3">
+            <div className="flex items-baseline gap-2">
+              <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700">
+                {isBiller ? 'Pedido para Caja' : 'Carrito de Venta'}
+              </h2>
+              <span className="text-xs text-slate-400">· {cart.length} artículo(s)</span>
             </div>
             {activeOrder && (
               <div className="mt-2 flex items-center justify-between rounded-lg bg-indigo-600 px-3 py-1.5 text-white">
@@ -1045,6 +1058,31 @@ export default function POSPage() {
                 </button>
               </div>
             )}
+
+            {/* Barra de acciones del carrito (antes eran atajos sueltos). */}
+            <div className="mt-2 grid grid-cols-5 gap-1.5">
+              {([
+                ['📦', 'Productos', 'F1', () => { setShowProducts(true); requestAnimationFrame(() => searchRef.current?.focus()); }, true],
+                ['👤', 'Cliente', 'F2', () => focusClientRnc(), false],
+                ['％', 'Descuento', 'F3', () => { setDiscountInput(discountAmount > 0 ? String(discountAmount) : ''); setShowDiscountModal(true); }, false],
+                ['＃', 'Cantidad', 'F4', () => focusLineQuantity(), false],
+                ['🗑', 'Borrar', 'F5', () => { setCart([]); setDiscountAmount(0); }, false],
+              ] as [string, string, string, () => void, boolean][]).map(([icon, label, key, fn, primary]) => (
+                <button
+                  key={key}
+                  onClick={fn}
+                  className={`flex flex-col items-center gap-0.5 rounded-lg border px-1 py-2 text-xs font-semibold transition-colors ${
+                    primary
+                      ? 'border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-500'
+                      : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:bg-indigo-50'
+                  }`}
+                >
+                  <span className="text-base leading-none">{icon}</span>
+                  <span className="leading-none">{label}</span>
+                  <span className={`text-[10px] font-normal leading-none ${primary ? 'text-indigo-200' : 'text-slate-400'}`}>{key}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Área desplazable: opciones fiscales + carrito. Los totales y el botón
@@ -1077,11 +1115,30 @@ export default function POSPage() {
             </label>
 
             {receiptConfig.needsRnc && (
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-slate-600">RNC del Cliente</label>
-                <input value={clientRnc} onChange={(e) => setClientRnc(e.target.value)}
-                  ref={clientRncRef}
-                  placeholder="9 u 11 dígitos" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400" />
+              <div className="space-y-2 rounded-lg border border-indigo-100 bg-indigo-50/40 p-2.5">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">RNC / Cédula del Cliente</label>
+                  <div className="flex gap-2">
+                    <input value={clientRnc}
+                      onChange={(e) => { setClientRnc(e.target.value); setRncLookup('idle'); }}
+                      onBlur={(e) => lookupClientRnc(e.target.value)}
+                      ref={clientRncRef}
+                      placeholder="9 u 11 dígitos"
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400" />
+                    <button type="button" onClick={() => lookupClientRnc(clientRnc)} disabled={rncLookup === 'loading'}
+                      className="shrink-0 rounded-lg border border-indigo-300 bg-white px-3 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 disabled:opacity-50">
+                      {rncLookup === 'loading' ? '…' : '🔍 Buscar'}
+                    </button>
+                  </div>
+                  {rncLookup === 'found' && <p className="mt-1 text-[11px] font-medium text-emerald-600">✓ Nombre encontrado en la DGII</p>}
+                  {rncLookup === 'notfound' && <p className="mt-1 text-[11px] text-amber-600">No se encontró en la DGII — escribe el nombre manualmente.</p>}
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">Nombre / Razón Social</label>
+                  <input value={clientName} onChange={(e) => setClientName(e.target.value)}
+                    placeholder="Nombre del comercio o cliente"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400" />
+                </div>
               </div>
             )}
           </div>

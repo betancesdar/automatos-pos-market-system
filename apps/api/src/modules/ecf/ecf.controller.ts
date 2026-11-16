@@ -16,6 +16,13 @@ class UpsertEcfConfigDto {
 export class EcfController {
   constructor(private readonly ecfService: EcfService) {}
 
+  // Disponible para caja/facturador: autocompleta el nombre del cliente por RNC.
+  @RequirePermissions('catalog.view')
+  @Get('rnc-lookup/:rnc')
+  lookupRnc(@Param('rnc') rnc: string) {
+    return this.ecfService.lookupRnc(rnc);
+  }
+
   @RequirePermissions('ecf.view')
   @Get('submissions')
   listSubmissions(@TenantId() tenantId: string, @Query('status') status?: string) {

@@ -21,6 +21,8 @@ export interface ThermalReceiptData {
   invoiceNumber?: string | null;
   ncf?: string | null;
   ncfType?: string | null;
+  clientName?: string | null;
+  clientRnc?: string | null;
   date: Date;
   cashierName?: string | null;
   items: ThermalReceiptItem[];
@@ -134,6 +136,8 @@ export function buildThermalReceiptHtml(data: ThermalReceiptData): string {
   ${data.invoiceNumber ? `<div>Factura: <span class="bold">${escapeHtml(data.invoiceNumber)}</span></div>` : ''}
   ${data.ncf ? `<div>NCF: <span class="bold">${escapeHtml(data.ncf)}</span></div>` : ''}
   ${data.ncf && data.ncfType ? `<div class="muted">Tipo: ${escapeHtml(data.ncfType)}</div>` : ''}
+  ${data.clientName ? `<div>Cliente: <span class="bold">${escapeHtml(data.clientName)}</span></div>` : ''}
+  ${data.clientRnc ? `<div class="muted">RNC/Céd.: ${escapeHtml(data.clientRnc)}</div>` : ''}
   <div>Fecha: ${escapeHtml(data.date.toLocaleString('es-DO'))}</div>
   ${data.cashierName ? `<div>Cajero: ${escapeHtml(data.cashierName)}</div>` : ''}
 

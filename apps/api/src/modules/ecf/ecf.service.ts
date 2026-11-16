@@ -132,6 +132,59 @@ export class EcfService {
     };
   }
 
+  /**
+   * Consulta el RNC/Cédula en el padrón de la DGII y devuelve la razón social /
+   * nombre comercial, para autocompletar el nombre del cliente en la factura.
+   * Es el mismo padrón que usa Pronesoft; funciona aunque la matriz no esté
+   * configurada aún. Nunca lanza por red: si falla, devuelve found:false.
+   */
+  async lookupRnc(rnc: string) {
+    const clean = (rnc || '').replace(/\D/g, '');
+    if (clean.length !== 9 && clean.length !== 11) {
+      throw new BadRequestException('RNC/Cédula inválido (debe tener 9 u 11 dígitos)');
+    }
+    try {
+      // Servicio del padrón DGII (WSMovilDGII). Requiere POST form-urlencoded y
+      // un User-Agent de navegador (su WAF bloquea clientes genéricos).
+      const url = 'https://www.dgii.gov.do/wsMovilDGII/WSMovilDGII.asmx/GetContribuyentes';
+      const body = `value=${clean}&patronBusqueda=0&inicioFilas=0&filaFilas=1&IMEI=`;
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 6000);
+      const res = await fetch(url, {
+        method: 'POST',
+        signal: ctrl.signal,
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: '*/*',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36',
+        },
+        body,
+      });
+      clearTimeout(timer);
+      if (!res.ok) return { rnc: clean, found: false };
+
+      const xml = await res.text();
+      const inner = xml.replace(/<\/?string[^>]*>/gi, '').trim();
+      const decoded = inner
+        .replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+      if (!decoded || decoded === '{}') return { rnc: clean, found: false };
+
+      const data = JSON.parse(decoded) as Record<string, string>;
+      const name = (data.RGE_NOMBRE || data.NOMBRE_COMERCIAL || '').trim();
+      if (!name) return { rnc: clean, found: false };
+      return {
+        rnc: clean,
+        found: true,
+        name,
+        commercialName: (data.NOMBRE_COMERCIAL || '').trim() || null,
+        status: (data.ESTADO || '').trim() || null,
+      };
+    } catch {
+      return { rnc: clean, found: false, error: 'No se pudo consultar el RNC en la DGII en este momento.' };
+    }
+  }
+
   /** Traduce errores de Pronesoft a mensajes HTTP legibles (en vez de un 500 crudo). */
   private mapPronesoftError(err: unknown): never {
     if (err instanceof PronesoftApiError) {
