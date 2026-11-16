@@ -14,7 +14,11 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=deps /app/packages/database/node_modules ./packages/database/node_modules
 COPY . .
-RUN pnpm --filter database exec prisma generate
+# `prisma generate` carga prisma.config.ts, que exige DATABASE_URL al resolver el
+# datasource. En build no hay conexión real: un placeholder basta (generate no se
+# conecta). En runtime, migrate deploy usa el DATABASE_URL real del compose.
+RUN DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=public" \
+    pnpm --filter database exec prisma generate
 RUN pnpm --filter api build
 
 FROM node:20-alpine AS runner
