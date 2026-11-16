@@ -146,6 +146,7 @@ export default function POSPage() {
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
   const [activeLineId, setActiveLineId] = useState<string | null>(null);
   const [showDiscountModal, setShowDiscountModal] = useState(false);
+  const [showFiscalModal, setShowFiscalModal] = useState(false);
   const [discountMode, setDiscountMode] = useState<'fixed' | 'percent'>('fixed');
   const [discountInput, setDiscountInput] = useState('');
   const [discountAmount, setDiscountAmount] = useState(0);
@@ -698,12 +699,6 @@ export default function POSPage() {
     setRncLookup('idle');
   };
 
-  const focusClientRnc = () => {
-    setFiscalMode(true);
-    setReceiptType('CREDITO_FISCAL');
-    requestAnimationFrame(() => clientRncRef.current?.focus());
-  };
-
   /** Consulta el RNC/Cédula en la DGII y autocompleta el nombre del cliente. */
   const lookupClientRnc = async (raw: string) => {
     const clean = raw.replace(/\D/g, '');
@@ -747,7 +742,7 @@ export default function POSPage() {
 
       switch (e.key) {
         case 'F1': e.preventDefault(); setShowProducts(true); requestAnimationFrame(() => searchRef.current?.focus()); break;
-        case 'F2': e.preventDefault(); focusClientRnc(); break;
+        case 'F2': e.preventDefault(); setShowFiscalModal(true); break;
         case 'F3':
           e.preventDefault();
           setDiscountInput(discountAmount > 0 ? String(discountAmount) : '');
@@ -1086,110 +1081,40 @@ export default function POSPage() {
               </div>
             )}
 
-            {/* Barra de acciones del carrito (antes eran atajos sueltos). */}
+            {/* Barra de acciones del carrito. El comprobante vive aquí (no en el
+                área de productos), para que esa zona quede limpia y dinámica. */}
             <div className="mt-2 grid grid-cols-5 gap-1.5">
               {([
-                ['📦', 'Productos', 'F1', () => { setShowProducts(true); requestAnimationFrame(() => searchRef.current?.focus()); }, true],
-                ['👤', 'Cliente', 'F2', () => focusClientRnc(), false],
-                ['％', 'Descuento', 'F3', () => { setDiscountInput(discountAmount > 0 ? String(discountAmount) : ''); setShowDiscountModal(true); }, false],
-                ['＃', 'Cantidad', 'F4', () => focusLineQuantity(), false],
-                ['🗑', 'Borrar', 'F5', () => { setCart([]); setDiscountAmount(0); }, false],
-              ] as [string, string, string, () => void, boolean][]).map(([icon, label, key, fn, primary]) => (
+                ['📦', 'Productos', 'F1', () => { setShowProducts(true); requestAnimationFrame(() => searchRef.current?.focus()); }, 'primary'],
+                ['🧾', 'Comprobante', fiscalMode ? 'Fiscal' : 'Contado', () => setShowFiscalModal(true), fiscalMode ? 'fiscal' : 'default'],
+                ['％', 'Descuento', 'F3', () => { setDiscountInput(discountAmount > 0 ? String(discountAmount) : ''); setShowDiscountModal(true); }, 'default'],
+                ['＃', 'Cantidad', 'F4', () => focusLineQuantity(), 'default'],
+                ['🗑', 'Borrar', 'F5', () => { setCart([]); setDiscountAmount(0); }, 'default'],
+              ] as [string, string, string, () => void, string][]).map(([icon, label, sub, fn, variant], i) => (
                 <button
-                  key={key}
+                  key={i}
                   onClick={fn}
                   className={`flex flex-col items-center gap-0.5 rounded-lg border px-1 py-2 text-xs font-semibold transition-colors ${
-                    primary
+                    variant === 'primary'
                       ? 'border-indigo-600 bg-indigo-600 text-white hover:bg-indigo-500'
-                      : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:bg-indigo-50'
+                      : variant === 'fiscal'
+                        ? 'border-amber-400 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:bg-indigo-50'
                   }`}
                 >
                   <span className="text-base leading-none">{icon}</span>
                   <span className="leading-none">{label}</span>
-                  <span className={`text-[10px] font-normal leading-none ${primary ? 'text-indigo-200' : 'text-slate-400'}`}>{key}</span>
+                  <span className={`text-[10px] font-normal leading-none ${
+                    variant === 'primary' ? 'text-indigo-200' : variant === 'fiscal' ? 'text-amber-500' : 'text-slate-400'
+                  }`}>{sub}</span>
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Área desplazable: opciones fiscales + carrito. Los totales y el botón
-              de pago quedan FIJOS abajo para que nunca se corten. */}
+          {/* Área de productos del carrito: limpia y dinámica (se llena al agregar).
+              El comprobante se gestiona desde el botón «Comprobante» (modal). */}
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          {/* Fiscal options */}
-          <div className="shrink-0 space-y-3 border-b border-slate-200 px-4 py-3">
-            {!fiscalMode ? (
-              <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
-                <div>
-                  <p className="text-sm font-semibold text-slate-700">🧾 Factura de contado</p>
-                  <p className="text-[11px] text-slate-400">Sin comprobante fiscal (NCF)</p>
-                </div>
-                <button type="button" onClick={enableFiscal}
-                  className="shrink-0 rounded-lg border border-indigo-300 bg-white px-3 py-2 text-xs font-bold text-indigo-600 hover:bg-indigo-50">
-                  Factura con comprobante fiscal
-                </button>
-              </div>
-            ) : (
-              <>
-            <div>
-              <div className="mb-1 flex items-center justify-between">
-                <label className="text-xs font-semibold text-slate-600">Tipo de Comprobante / NCF</label>
-                <button type="button" onClick={disableFiscal} className="text-[11px] font-semibold text-slate-400 hover:text-slate-700">
-                  ← Volver a contado
-                </button>
-              </div>
-              <select
-                value={receiptType}
-                onChange={(e) => setReceiptType(e.target.value as ReceiptTypeValue)}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400"
-              >
-                {RECEIPT_TYPES.filter((r) => r.value !== 'VENTA_RAPIDA' && r.value !== 'SIN_NCF').map((r) => (
-                  <option key={r.value} value={r.value}>{r.label}</option>
-                ))}
-              </select>
-              {'help' in receiptConfig && receiptConfig.help && (
-                <p className="mt-1 rounded-md bg-slate-50 px-2 py-1 text-[11px] leading-snug text-slate-500">
-                  💡 {receiptConfig.help}
-                </p>
-              )}
-            </div>
-
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" checked={applyItbis} onChange={(e) => setApplyItbis(e.target.checked)}
-                className="rounded border-slate-300 text-indigo-600" />
-              Aplicar ITBIS (18%)
-            </label>
-
-            {receiptConfig.needsRnc && (
-              <div className="space-y-2 rounded-lg border border-indigo-100 bg-indigo-50/40 p-2.5">
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-slate-600">RNC / Cédula del Cliente</label>
-                  <div className="flex gap-2">
-                    <input value={clientRnc}
-                      onChange={(e) => { setClientRnc(e.target.value); setRncLookup('idle'); }}
-                      onBlur={(e) => lookupClientRnc(e.target.value)}
-                      ref={clientRncRef}
-                      placeholder="9 u 11 dígitos"
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400" />
-                    <button type="button" onClick={() => lookupClientRnc(clientRnc)} disabled={rncLookup === 'loading'}
-                      className="shrink-0 rounded-lg border border-indigo-300 bg-white px-3 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 disabled:opacity-50">
-                      {rncLookup === 'loading' ? '…' : '🔍 Buscar'}
-                    </button>
-                  </div>
-                  {rncLookup === 'found' && <p className="mt-1 text-[11px] font-medium text-emerald-600">✓ Nombre encontrado en la DGII</p>}
-                  {rncLookup === 'notfound' && <p className="mt-1 text-[11px] text-amber-600">No se encontró en la DGII — escribe el nombre manualmente.</p>}
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-slate-600">Nombre / Razón Social</label>
-                  <input value={clientName} onChange={(e) => setClientName(e.target.value)}
-                    placeholder="Nombre del comercio o cliente"
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400" />
-                </div>
-              </div>
-            )}
-              </>
-            )}
-          </div>
-
           {/* Cart table */}
           <div className="flex-1">
             {cart.length === 0 ? (
@@ -1353,6 +1278,92 @@ export default function POSPage() {
                 <button type="button" onClick={applyDiscount}
                   className="flex-1 rounded-xl bg-indigo-600 py-3 font-bold text-white hover:bg-indigo-500">Aplicar</button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Comprobante modal (F2) — contado por defecto; fiscal al elegirlo */}
+      {showFiscalModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+              <h3 className="text-lg font-bold text-slate-900">🧾 Comprobante</h3>
+              <button onClick={() => setShowFiscalModal(false)} className="text-slate-400 hover:text-slate-700">✕</button>
+            </div>
+            <div className="space-y-4 p-6">
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={disableFiscal}
+                  className={`rounded-xl border p-3 text-left ${!fiscalMode ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:bg-slate-50'}`}>
+                  <p className="text-sm font-bold text-slate-800">Contado</p>
+                  <p className="text-[11px] text-slate-500">Sin comprobante fiscal</p>
+                </button>
+                <button type="button" onClick={enableFiscal}
+                  className={`rounded-xl border p-3 text-left ${fiscalMode ? 'border-amber-500 bg-amber-50' : 'border-slate-200 hover:bg-slate-50'}`}>
+                  <p className="text-sm font-bold text-slate-800">Comprobante fiscal</p>
+                  <p className="text-[11px] text-slate-500">Con NCF / e-CF</p>
+                </button>
+              </div>
+
+              {fiscalMode && (
+                <>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-slate-600">Tipo de Comprobante / NCF</label>
+                    <select
+                      value={receiptType}
+                      onChange={(e) => setReceiptType(e.target.value as ReceiptTypeValue)}
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400"
+                    >
+                      {RECEIPT_TYPES.filter((r) => r.value !== 'VENTA_RAPIDA' && r.value !== 'SIN_NCF').map((r) => (
+                        <option key={r.value} value={r.value}>{r.label}</option>
+                      ))}
+                    </select>
+                    {'help' in receiptConfig && receiptConfig.help && (
+                      <p className="mt-1 rounded-md bg-slate-50 px-2 py-1 text-[11px] leading-snug text-slate-500">💡 {receiptConfig.help}</p>
+                    )}
+                  </div>
+
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input type="checkbox" checked={applyItbis} onChange={(e) => setApplyItbis(e.target.checked)}
+                      className="rounded border-slate-300 text-indigo-600" />
+                    Aplicar ITBIS (18%)
+                  </label>
+
+                  {receiptConfig.needsRnc && (
+                    <div className="space-y-2 rounded-lg border border-indigo-100 bg-indigo-50/40 p-2.5">
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-slate-600">RNC / Cédula del Cliente</label>
+                        <div className="flex gap-2">
+                          <input value={clientRnc}
+                            onChange={(e) => { setClientRnc(e.target.value); setRncLookup('idle'); }}
+                            onBlur={(e) => lookupClientRnc(e.target.value)}
+                            ref={clientRncRef}
+                            placeholder="9 u 11 dígitos"
+                            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400" />
+                          <button type="button" onClick={() => lookupClientRnc(clientRnc)} disabled={rncLookup === 'loading'}
+                            className="shrink-0 rounded-lg border border-indigo-300 bg-white px-3 text-xs font-semibold text-indigo-600 hover:bg-indigo-50 disabled:opacity-50">
+                            {rncLookup === 'loading' ? '…' : '🔍 Buscar'}
+                          </button>
+                        </div>
+                        {rncLookup === 'found' && <p className="mt-1 text-[11px] font-medium text-emerald-600">✓ Nombre encontrado en la DGII</p>}
+                        {rncLookup === 'notfound' && <p className="mt-1 text-[11px] text-amber-600">No se encontró en la DGII — escribe el nombre manualmente.</p>}
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-slate-600">Nombre / Razón Social</label>
+                        <input value={clientName} onChange={(e) => setClientName(e.target.value)}
+                          placeholder="Nombre del comercio o cliente"
+                          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400" />
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="border-t border-slate-200 px-6 py-4">
+              <button onClick={() => setShowFiscalModal(false)}
+                className="w-full rounded-xl bg-indigo-600 py-3 font-bold text-white hover:bg-indigo-500">
+                Listo
+              </button>
             </div>
           </div>
         </div>
