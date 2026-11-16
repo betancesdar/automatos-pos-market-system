@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Query, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Query, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { CreditService } from './credit.service';
 import type { CreditCheckoutDto, CreditPaymentDto } from './credit.service';
@@ -50,6 +50,16 @@ export class CreditController {
     @Req() req: Request & { user: TokenPayload },
   ) {
     return this.creditService.creditCheckout(tenantId, req.user.sub, body);
+  }
+
+  @RequirePermissions('credit.sell')
+  @Patch(':id/late-fee')
+  setLateFee(
+    @TenantId() tenantId: string,
+    @Param('id') id: string,
+    @Body() body: { lateFeePercent: number },
+  ) {
+    return this.creditService.setLateFee(tenantId, id, body.lateFeePercent);
   }
 
   @RequirePermissions('credit.payment')

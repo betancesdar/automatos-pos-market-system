@@ -934,19 +934,14 @@ function EcfSection({
   flash: (m: string) => void;
   fail: (e: unknown, f: string) => void;
 }) {
-  const [config, setConfig] = useState<{ enabled: boolean; environment: string; clientId: string; hasSecret: boolean } | null>(null);
-  const [clientId, setClientId] = useState('');
-  const [clientSecret, setClientSecret] = useState('');
-  const [environment, setEnvironment] = useState('sandbox');
+  const [config, setConfig] = useState<{ enabled: boolean; pronesoftBusinessId: string | null; pronesoftRnc: string | null; platformEnabled: boolean } | null>(null);
   const [enabled, setEnabled] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    apiFetch<{ enabled: boolean; environment: string; clientId: string; hasSecret: boolean }>('/ecf/config', tenantId)
+    apiFetch<{ enabled: boolean; pronesoftBusinessId: string | null; pronesoftRnc: string | null; platformEnabled: boolean }>('/ecf/config', tenantId)
       .then((c) => {
         setConfig(c);
-        setClientId(c.clientId);
-        setEnvironment(c.environment);
         setEnabled(c.enabled);
       })
       .catch(() => {});
@@ -957,31 +952,27 @@ function EcfSection({
     try {
       await apiFetch('/ecf/config', tenantId, {
         method: 'PUT',
-        body: JSON.stringify({
-          enabled,
-          environment,
-          clientId: clientId || undefined,
-          clientSecret: clientSecret || undefined,
-        }),
+        body: JSON.stringify({ enabled }),
       });
-      setClientSecret('');
       flash('Configuración e-CF guardada');
       onReload();
     } catch (err) { fail(err, 'Error guardando configuración e-CF'); }
     finally { setSaving(false); }
   };
 
+  const linked = Boolean(config?.pronesoftBusinessId);
+
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-slate-200 bg-white p-5">
         <h3 className="mb-1 font-bold text-slate-900">Facturación Electrónica (Pronesoft)</h3>
         <p className="mb-4 text-xs text-slate-500">
-          Las ventas fiscales se emiten como e-CF de forma asíncrona — una venta nunca falla por e-CF.
-          {environment === 'sandbox' && ' Ambiente actual: SANDBOX (pruebas).'}
+          Facturación electrónica <b>real</b> ante la DGII. Las credenciales y el vínculo con tu empresa las
+          administra el proveedor del sistema; aquí solo activas o desactivas la emisión de e-CF.
         </p>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-3">
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Estado</label>
+            <label className="mb-1 block text-xs font-semibold text-slate-600">Emisión de e-CF</label>
             <button onClick={() => setEnabled((v) => !v)}
               className={`w-full rounded-lg border px-3 py-2 text-sm font-bold ${
                 enabled ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-500'
@@ -990,27 +981,23 @@ function EcfSection({
             </button>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Ambiente</label>
-            <select value={environment} onChange={(e) => setEnvironment(e.target.value)}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
-              <option value="sandbox">Sandbox (pruebas)</option>
-              <option value="prod">Producción</option>
-            </select>
+            <label className="mb-1 block text-xs font-semibold text-slate-600">Vínculo con tu empresa</label>
+            <div className={`rounded-lg border px-3 py-2 text-sm font-semibold ${linked ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-amber-300 bg-amber-50 text-amber-700'}`}>
+              {linked ? '✓ Empresa vinculada' : 'Pendiente de vincular'}
+            </div>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Client ID</label>
-            <input value={clientId} onChange={(e) => setClientId(e.target.value)}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">
-              Client Secret {config?.hasSecret && <span className="text-emerald-600">(guardado ✓)</span>}
-            </label>
-            <input type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)}
-              placeholder={config?.hasSecret ? '••••••••  (dejar vacío para no cambiar)' : ''}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+            <label className="mb-1 block text-xs font-semibold text-slate-600">Plataforma</label>
+            <div className={`rounded-lg border px-3 py-2 text-sm font-semibold ${config?.platformEnabled ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+              {config?.platformEnabled ? '✓ Activa' : 'No configurada'}
+            </div>
           </div>
         </div>
+        {!linked && (
+          <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            Para emitir e-CF, el proveedor del sistema debe vincular tu empresa y registrar tus secuencias de e-NCF.
+          </p>
+        )}
         <button onClick={save} disabled={saving}
           className="mt-4 rounded-xl bg-indigo-600 px-6 py-2.5 text-sm font-bold text-white hover:bg-indigo-500 disabled:opacity-50">
           {saving ? 'Guardando…' : 'Guardar configuración'}

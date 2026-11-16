@@ -121,6 +121,9 @@ export default function POSPage() {
   const [activeCategory, setActiveCategory] = useState('TODOS');
   const [search, setSearch] = useState('');
   const [loadingProducts, setLoadingProducts] = useState(true);
+  // El carrito es el protagonista; el inventario vive en un panel flotante
+  // que se abre con el botón «Productos» (o F1).
+  const [showProducts, setShowProducts] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [scannedBarcode, setScannedBarcode] = useState('');
@@ -673,7 +676,7 @@ export default function POSPage() {
       }
 
       switch (e.key) {
-        case 'F1': e.preventDefault(); searchRef.current?.focus(); break;
+        case 'F1': e.preventDefault(); setShowProducts(true); requestAnimationFrame(() => searchRef.current?.focus()); break;
         case 'F2': e.preventDefault(); focusClientRnc(); break;
         case 'F3':
           e.preventDefault();
@@ -860,9 +863,21 @@ export default function POSPage() {
         />
       )}
 
-      <div className="flex min-h-0 flex-1">
-        {/* LEFT — Product workspace */}
-        <div className="flex min-w-0 flex-1 flex-col border-r border-slate-200 bg-slate-50">
+      <div className="relative flex min-h-0 flex-1">
+        {/* Panel FLOTANTE de productos / inventario (35% de la pantalla).
+            El carrito es el protagonista; aquí solo se buscan y agregan productos. */}
+        {showProducts && (
+        <div className="absolute inset-0 z-30 flex">
+        <div className="flex w-[35%] min-w-[360px] flex-col border-r border-slate-200 bg-slate-50 shadow-2xl">
+          <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
+            <div>
+              <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700">📦 Productos / Inventario</h2>
+              <p className="text-xs text-slate-400">Toca un producto para agregarlo al carrito</p>
+            </div>
+            <button onClick={() => setShowProducts(false)} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50">
+              ✕ Cerrar
+            </button>
+          </div>
           {usingCachedCatalog && (
             <div className="border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-center text-xs font-semibold text-amber-800">
               📦 Mostrando catálogo guardado localmente (sin conexión) — los precios/stock pueden no estar actualizados
@@ -916,7 +931,7 @@ export default function POSPage() {
             ) : products.length === 0 ? (
               <p className="py-20 text-center text-slate-400">No hay productos en esta categoría</p>
             ) : (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
                 {products.map((p) => (
                   <button
                     key={p.id}
@@ -954,14 +969,28 @@ export default function POSPage() {
             ))}
           </div>
         </div>
+        {/* Backdrop: cierra el panel tocando fuera */}
+        <div className="flex-1 bg-slate-900/20" onClick={() => setShowProducts(false)} />
+        </div>
+        )}
 
-        {/* RIGHT — Cart sidebar */}
-        <div className="flex w-[420px] shrink-0 flex-col bg-white shadow-xl">
+        {/* CARRITO — protagonista, ocupa todo el ancho disponible */}
+        <div className="flex min-w-0 flex-1 flex-col bg-white">
           <div className="border-b border-slate-200 px-4 py-3">
-            <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700">
-              {isBiller ? 'Pedido para Caja' : 'Carrito de Venta'}
-            </h2>
-            <p className="text-xs text-slate-400">{cart.length} artículo(s)</p>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700">
+                  {isBiller ? 'Pedido para Caja' : 'Carrito de Venta'}
+                </h2>
+                <p className="text-xs text-slate-400">{cart.length} artículo(s)</p>
+              </div>
+              <button
+                onClick={() => { setShowProducts(true); requestAnimationFrame(() => searchRef.current?.focus()); }}
+                className="shrink-0 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-indigo-500"
+              >
+                📦 Productos <span className="font-normal text-indigo-200">(F1)</span>
+              </button>
+            </div>
             {activeOrder && (
               <div className="mt-2 flex items-center justify-between rounded-lg bg-indigo-600 px-3 py-1.5 text-white">
                 <span className="text-sm font-bold">
@@ -1017,7 +1046,16 @@ export default function POSPage() {
           {/* Cart table */}
           <div className="flex-1">
             {cart.length === 0 ? (
-              <p className="py-16 text-center text-sm text-slate-400">Agrega productos desde la cuadrícula</p>
+              <div className="py-16 text-center">
+                <p className="text-sm text-slate-400">El carrito está vacío</p>
+                <button
+                  onClick={() => { setShowProducts(true); requestAnimationFrame(() => searchRef.current?.focus()); }}
+                  className="mt-3 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-indigo-500"
+                >
+                  📦 Abrir Productos (F1)
+                </button>
+                <p className="mt-2 text-xs text-slate-400">o escanea un código de barra</p>
+              </div>
             ) : (
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-slate-50 text-xs uppercase text-slate-500">
@@ -1034,7 +1072,7 @@ export default function POSPage() {
                     <tr key={item.cartId}
                       onClick={() => setActiveLineId(item.cartId)}
                       className={`border-b border-slate-100 hover:bg-slate-50 ${activeLineId === item.cartId ? 'bg-indigo-50/60' : ''}`}>
-                      <td className="max-w-[120px] truncate px-3 py-2 font-medium text-slate-800">
+                      <td className="max-w-[320px] truncate px-3 py-2 font-medium text-slate-800">
                         {item.name}
                         {item.isLoose && <span className="ml-1 text-[10px] text-amber-600">DETALLE</span>}
                       </td>

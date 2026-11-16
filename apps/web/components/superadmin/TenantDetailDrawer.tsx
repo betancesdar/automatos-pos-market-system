@@ -65,7 +65,7 @@ export function TenantDetailDrawer({
   // Fiscal
   const [sequences, setSequences] = useState<NcfSequence[]>([]);
   const [seqForm, setSeqForm] = useState({ type: 'CONSUMIDOR_FINAL', prefix: 'B02', nextValue: '1' });
-  const [ecf, setEcf] = useState<{ enabled: boolean; pronesoftBusinessId: string | null; pronesoftRnc: string | null; platformEnabled: boolean; platformEnvironment: string } | null>(null);
+  const [ecf, setEcf] = useState<{ enabled: boolean; pronesoftBusinessId: string | null; pronesoftRnc: string | null; platformEnabled: boolean } | null>(null);
   const [ecfForm, setEcfForm] = useState({ enabled: false, pronesoftBusinessId: '' });
   const [associated, setAssociated] = useState<{ id: string; name: string; rnc: string }[]>([]);
   const [ecfSeqs, setEcfSeqs] = useState<unknown[] | null>(null);
@@ -89,7 +89,7 @@ export function TenantDetailDrawer({
     try {
       const [seqs, cfg] = await Promise.all([
         superadminFetch<NcfSequence[]>(`/superadmin/tenants/${tenant.id}/ncf-sequences`),
-        superadminFetch<{ enabled: boolean; pronesoftBusinessId: string | null; pronesoftRnc: string | null; platformEnabled: boolean; platformEnvironment: string }>(
+        superadminFetch<{ enabled: boolean; pronesoftBusinessId: string | null; pronesoftRnc: string | null; platformEnabled: boolean }>(
           `/superadmin/tenants/${tenant.id}/ecf-config`,
         ),
       ]);
@@ -315,8 +315,7 @@ export function TenantDetailDrawer({
                 ) : (
                   <>
                     <p className="mb-3 text-xs text-slate-400">
-                      Ambiente de la matriz: <span className="font-bold text-slate-200">{ecf.platformEnvironment}</span>.
-                      Vincula este comercio con su empresa asociada en Pronesoft.
+                      Vincula este comercio con su empresa asociada en Pronesoft (facturación real · DGII).
                     </p>
                     <div className="grid grid-cols-2 gap-3">
                       <button onClick={() => setEcfForm({ ...ecfForm, enabled: !ecfForm.enabled })}
@@ -369,7 +368,7 @@ export function TenantDetailDrawer({
                             {JSON.stringify(ecfSeqs, null, 1)}
                           </pre>
                         )}
-                        <p className="mt-1 text-[11px] text-slate-500">En sandbox las secuencias son automáticas; en producción se crean con el rango que te da el comercio.</p>
+                        <p className="mt-1 text-[11px] text-slate-500">Las secuencias de producción se crean con el rango de e-NCF que te entrega el comercio (autorizado por la DGII).</p>
                       </div>
                     )}
                   </>

@@ -58,6 +58,7 @@ export default function CreditPage() {
   // abono
   const [payAmount, setPayAmount] = useState('');
   const [payMethod, setPayMethod] = useState('CASH');
+  const [moraInput, setMoraInput] = useState('');
 
   const loadList = useCallback(async () => {
     try {
@@ -93,7 +94,10 @@ export default function CreditPage() {
   };
 
   const openDetail = async (id: string) => {
-    try { setSelected(await apiFetch<CreditSale>(`/credit/${id}`, tenantId)); setPayAmount(''); }
+    try {
+      const c = await apiFetch<CreditSale>(`/credit/${id}`, tenantId);
+      setSelected(c); setPayAmount(''); setMoraInput(Number(c.lateFeePercent).toString());
+    }
     catch (e) { setError(e instanceof Error ? e.message : 'Error'); }
   };
 
@@ -129,15 +133,39 @@ export default function CreditPage() {
     finally { setBusy(false); }
   };
 
-  const registerPayment = async () => {
+  const registerPayment = async (amountOverride?: number) => {
     if (!selected) return;
+    const amount = amountOverride ?? (parseFloat(payAmount) || 0);
+    if (amount <= 0) return;
     setBusy(true); setError('');
     try {
       const updated = await apiFetch<CreditSale>(`/credit/${selected.id}/payments`, tenantId, {
-        method: 'POST', body: JSON.stringify({ amount: parseFloat(payAmount) || 0, method: payMethod }),
+        method: 'POST', body: JSON.stringify({ amount, method: payMethod }),
       });
       setSelected(updated); setPayAmount(''); loadList();
     } catch (e) { setError(e instanceof Error ? e.message : 'Error registrando abono'); }
+    finally { setBusy(false); }
+  };
+
+  /** Salda el crédito completo: abona el balance pendiente de una vez. */
+  const settleAll = async () => {
+    if (!selected) return;
+    const balance = Number(selected.balance);
+    if (balance <= 0) return;
+    if (!confirm(`¿Saldar la cuenta completa de ${selected.customer?.name}?\nSe registrará un pago de RD$ ${balance.toFixed(2)} (${payMethod === 'CASH' ? 'Efectivo' : payMethod === 'CARD' ? 'Tarjeta' : 'Transferencia'}).`)) return;
+    await registerPayment(balance);
+  };
+
+  /** Ajusta o condona la mora (recargo por atraso) de este crédito. */
+  const saveMora = async (value: number) => {
+    if (!selected) return;
+    setBusy(true); setError('');
+    try {
+      const updated = await apiFetch<CreditSale>(`/credit/${selected.id}/late-fee`, tenantId, {
+        method: 'PATCH', body: JSON.stringify({ lateFeePercent: value }),
+      });
+      setSelected(updated); setMoraInput(Number(updated.lateFeePercent).toString()); loadList();
+    } catch (e) { setError(e instanceof Error ? e.message : 'Error actualizando la mora'); }
     finally { setBusy(false); }
   };
 
@@ -349,12 +377,35 @@ export default function CreditPage() {
               </table>
 
               {selected.status !== 'PAID' && selected.status !== 'CANCELLED' && can('credit.payment') && (
-                <div className="mb-3 flex gap-2">
-                  <input type="number" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} placeholder="Monto abono" className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                  <select value={payMethod} onChange={(e) => setPayMethod(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-2 text-sm">
-                    <option value="CASH">Efectivo</option><option value="TRANSFER">Transfer.</option><option value="CARD">Tarjeta</option>
-                  </select>
-                  <button onClick={registerPayment} disabled={busy || !payAmount} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Abonar</button>
+                <div className="mb-3 space-y-2">
+                  <div className="flex gap-2">
+                    <input type="number" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} placeholder="Monto abono" className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                    <select value={payMethod} onChange={(e) => setPayMethod(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-2 text-sm">
+                      <option value="CASH">Efectivo</option><option value="TRANSFER">Transfer.</option><option value="CARD">Tarjeta</option>
+                    </select>
+                    <button onClick={() => registerPayment()} disabled={busy || !payAmount} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Abonar</button>
+                  </div>
+                  <button onClick={settleAll} disabled={busy || Number(selected.balance) <= 0}
+                    className="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-500 disabled:opacity-50">
+                    ✓ Saldar cuenta completa — RD$ {Number(selected.balance).toFixed(2)}
+                  </button>
+                </div>
+              )}
+
+              {/* Mora (recargo por atraso) — se puede ajustar o condonar (poner en 0). */}
+              {selected.status !== 'CANCELLED' && can('credit.sell') && (
+                <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                  <p className="mb-1 text-xs font-bold uppercase text-amber-700">Mora / recargo por atraso</p>
+                  <div className="flex items-center gap-2">
+                    <input type="number" min={0} step="0.5" value={moraInput} onChange={(e) => setMoraInput(e.target.value)}
+                      className="w-20 rounded-lg border border-amber-300 px-2 py-1.5 text-right text-sm" />
+                    <span className="text-sm text-slate-600">%</span>
+                    <button onClick={() => saveMora(parseFloat(moraInput) || 0)} disabled={busy}
+                      className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-500 disabled:opacity-50">Guardar</button>
+                    <button onClick={() => saveMora(0)} disabled={busy || Number(selected.lateFeePercent) === 0}
+                      className="rounded-lg border border-amber-400 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-40">Condonar (0%)</button>
+                  </div>
+                  <p className="mt-1 text-[11px] text-amber-600">Mora actual: {Number(selected.lateFeePercent).toFixed(2)}%. Condónala para no cobrar recargo a este cliente.</p>
                 </div>
               )}
 

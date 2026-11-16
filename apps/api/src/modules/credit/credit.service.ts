@@ -388,6 +388,27 @@ export class CreditService {
     });
   }
 
+  /**
+   * Ajusta/condona la mora (recargo por atraso) de un crédito. Regla de negocio
+   * del comerciante: a algunos clientes se les cobra mora y a otros no, o se les
+   * condona. `lateFeePercent = 0` deja la cuenta sin recargo por atraso.
+   */
+  async setLateFee(tenantId: string, id: string, lateFeePercent: number) {
+    if (lateFeePercent == null || lateFeePercent < 0) {
+      throw new BadRequestException('El porcentaje de mora debe ser 0 o mayor');
+    }
+    const credit = await this.prisma.creditSale.findFirst({ where: { id, tenantId } });
+    if (!credit) throw new NotFoundException('Crédito no encontrado');
+    if (credit.status === CreditStatus.CANCELLED) {
+      throw new BadRequestException('Este crédito está cancelado');
+    }
+    await this.prisma.creditSale.update({
+      where: { id },
+      data: { lateFeePercent: D(lateFeePercent) },
+    });
+    return this.getCreditSale(tenantId, id);
+  }
+
   async dashboard(tenantId: string) {
     await this.refreshOverdue(tenantId);
     const [agg, overdueAgg, counts] = await Promise.all([

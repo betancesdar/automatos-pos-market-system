@@ -5,17 +5,13 @@ import { superadminFetch } from '../../lib/api';
 
 interface PlatformCfg {
   enabled: boolean;
-  activeEnvironment: string;
-  sandbox: { clientId: string; hasSecret: boolean };
-  prod: { clientId: string; hasSecret: boolean };
+  clientId: string;
+  hasSecret: boolean;
 }
 
 export function PronesoftMatrizModal({ onClose }: { onClose: () => void }) {
   const [cfg, setCfg] = useState<PlatformCfg | null>(null);
-  const [form, setForm] = useState({
-    enabled: false, activeEnvironment: 'sandbox',
-    sandboxClientId: '', sandboxClientSecret: '', prodClientId: '', prodClientSecret: '',
-  });
+  const [form, setForm] = useState({ enabled: false, clientId: '', clientSecret: '' });
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [saving, setSaving] = useState(false);
@@ -25,13 +21,7 @@ export function PronesoftMatrizModal({ onClose }: { onClose: () => void }) {
     try {
       const c = await superadminFetch<PlatformCfg>('/superadmin/ecf/platform-config');
       setCfg(c);
-      setForm((f) => ({
-        ...f,
-        enabled: c.enabled,
-        activeEnvironment: c.activeEnvironment,
-        sandboxClientId: c.sandbox.clientId,
-        prodClientId: c.prod.clientId,
-      }));
+      setForm((f) => ({ ...f, enabled: c.enabled, clientId: c.clientId }));
     } catch (e) { setError(e instanceof Error ? e.message : 'Error'); }
   };
   useEffect(() => { load(); }, []);
@@ -43,14 +33,11 @@ export function PronesoftMatrizModal({ onClose }: { onClose: () => void }) {
         method: 'PUT',
         body: JSON.stringify({
           enabled: form.enabled,
-          activeEnvironment: form.activeEnvironment,
-          sandboxClientId: form.sandboxClientId || undefined,
-          sandboxClientSecret: form.sandboxClientSecret || undefined,
-          prodClientId: form.prodClientId || undefined,
-          prodClientSecret: form.prodClientSecret || undefined,
+          clientId: form.clientId || undefined,
+          clientSecret: form.clientSecret || undefined,
         }),
       });
-      setForm((f) => ({ ...f, sandboxClientSecret: '', prodClientSecret: '' }));
+      setForm((f) => ({ ...f, clientSecret: '' }));
       setNotice('Credenciales de la matriz guardadas');
       load();
     } catch (e) { setError(e instanceof Error ? e.message : 'Error guardando'); }
@@ -81,30 +68,21 @@ export function PronesoftMatrizModal({ onClose }: { onClose: () => void }) {
             Una sola credencial (tu App matriz) opera por todas las empresas asociadas vía <code className="text-slate-300">x-tenant-id</code>.
             El secret es de solo escritura (se guarda cifrado).
           </p>
+          <div className="rounded-lg border border-amber-800 bg-amber-950/60 px-4 py-2 text-xs text-amber-300">
+            ⚠️ Facturación electrónica <b>real</b> (producción · DGII). Los e-CF que se emitan son válidos ante la DGII.
+          </div>
           {error && <div className="rounded-lg border border-red-800 bg-red-950 px-4 py-2 text-sm text-red-300">{error}</div>}
           {notice && <div className="rounded-lg border border-emerald-800 bg-emerald-950 px-4 py-2 text-sm text-emerald-300">{notice}</div>}
 
-          <div className="grid grid-cols-2 gap-3">
-            <button onClick={() => setForm({ ...form, enabled: !form.enabled })}
-              className={`rounded-lg border px-3 py-2 text-sm font-bold ${form.enabled ? 'border-emerald-700 bg-emerald-950 text-emerald-300' : 'border-slate-700 text-slate-500'}`}>
-              {form.enabled ? '✓ e-CF Habilitado' : 'e-CF Deshabilitado'}
-            </button>
-            <select value={form.activeEnvironment} onChange={(e) => setForm({ ...form, activeEnvironment: e.target.value })} className={input}>
-              <option value="sandbox">Ambiente: Sandbox</option>
-              <option value="prod">Ambiente: Producción</option>
-            </select>
-          </div>
+          <button onClick={() => setForm({ ...form, enabled: !form.enabled })}
+            className={`w-full rounded-lg border px-3 py-2 text-sm font-bold ${form.enabled ? 'border-emerald-700 bg-emerald-950 text-emerald-300' : 'border-slate-700 text-slate-500'}`}>
+            {form.enabled ? '✓ e-CF Habilitado' : 'e-CF Deshabilitado'}
+          </button>
 
           <div className="rounded-xl border border-slate-700 bg-slate-800/40 p-3">
-            <p className="mb-2 text-xs font-bold uppercase text-slate-500">Sandbox {cfg?.sandbox.hasSecret && <span className="text-emerald-400">✓ secret guardado</span>}</p>
-            <input value={form.sandboxClientId} onChange={(e) => setForm({ ...form, sandboxClientId: e.target.value })} placeholder="Client ID sandbox" className={`${input} mb-2`} />
-            <input type="password" value={form.sandboxClientSecret} onChange={(e) => setForm({ ...form, sandboxClientSecret: e.target.value })} placeholder={cfg?.sandbox.hasSecret ? '•••••• (vacío = no cambiar)' : 'Client Secret sandbox'} className={input} />
-          </div>
-
-          <div className="rounded-xl border border-slate-700 bg-slate-800/40 p-3">
-            <p className="mb-2 text-xs font-bold uppercase text-slate-500">Producción {cfg?.prod.hasSecret && <span className="text-emerald-400">✓ secret guardado</span>}</p>
-            <input value={form.prodClientId} onChange={(e) => setForm({ ...form, prodClientId: e.target.value })} placeholder="Client ID producción" className={`${input} mb-2`} />
-            <input type="password" value={form.prodClientSecret} onChange={(e) => setForm({ ...form, prodClientSecret: e.target.value })} placeholder={cfg?.prod.hasSecret ? '•••••• (vacío = no cambiar)' : 'Client Secret producción'} className={input} />
+            <p className="mb-2 text-xs font-bold uppercase text-slate-500">Credenciales Pronesoft {cfg?.hasSecret && <span className="text-emerald-400">✓ secret guardado</span>}</p>
+            <input value={form.clientId} onChange={(e) => setForm({ ...form, clientId: e.target.value })} placeholder="Client ID" className={`${input} mb-2`} />
+            <input type="password" value={form.clientSecret} onChange={(e) => setForm({ ...form, clientSecret: e.target.value })} placeholder={cfg?.hasSecret ? '•••••• (vacío = no cambiar)' : 'Client Secret'} className={input} />
           </div>
 
           <div className="flex gap-3">

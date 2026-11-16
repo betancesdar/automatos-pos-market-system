@@ -71,11 +71,8 @@ class UpsertEcfConfigDto {
 
 class PlatformEcfConfigDto {
   enabled?: boolean;
-  activeEnvironment?: string;
-  sandboxClientId?: string;
-  sandboxClientSecret?: string;
-  prodClientId?: string;
-  prodClientSecret?: string;
+  clientId?: string;
+  clientSecret?: string;
 }
 
 class CreateSequenceDto {
@@ -218,7 +215,6 @@ export class SuperadminController {
   upsertPlatformEcf(@Body() body: PlatformEcfConfigDto, @Req() req: Request & { user: TokenPayload }) {
     this.audit.log(this.actor(req), 'PLATFORM_ECF_UPDATE', null, {
       enabled: body.enabled,
-      activeEnvironment: body.activeEnvironment,
     });
     return this.ecfService.upsertPlatformConfig(body);
   }

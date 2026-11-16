@@ -53,58 +53,48 @@ export class EcfService {
   async getPlatformConfig() {
     const c = await this.prisma.platformEcfConfig.findUnique({ where: { id: this.PLATFORM_ID } });
     if (!c) {
-      return { enabled: false, activeEnvironment: 'sandbox', sandbox: { clientId: '', hasSecret: false }, prod: { clientId: '', hasSecret: false } };
+      return { enabled: false, clientId: '', hasSecret: false };
     }
     return {
       enabled: c.enabled,
-      activeEnvironment: c.activeEnvironment,
-      sandbox: { clientId: c.sandboxClientId ?? '', hasSecret: Boolean(c.sandboxClientSecretEnc) },
-      prod: { clientId: c.prodClientId ?? '', hasSecret: Boolean(c.prodClientSecretEnc) },
+      clientId: c.prodClientId ?? '',
+      hasSecret: Boolean(c.prodClientSecretEnc),
       updatedAt: c.updatedAt,
     };
   }
 
   async upsertPlatformConfig(data: {
     enabled?: boolean;
-    activeEnvironment?: string;
-    sandboxClientId?: string;
-    sandboxClientSecret?: string;
-    prodClientId?: string;
-    prodClientSecret?: string;
+    clientId?: string;
+    clientSecret?: string;
   }) {
-    if (data.activeEnvironment && !['sandbox', 'prod'].includes(data.activeEnvironment)) {
-      throw new BadRequestException('activeEnvironment debe ser "sandbox" o "prod"');
-    }
+    // Plataforma 100% producción (DGII real): no hay ambiente sandbox.
     const patch = {
+      activeEnvironment: 'prod',
       ...(data.enabled !== undefined ? { enabled: data.enabled } : {}),
-      ...(data.activeEnvironment ? { activeEnvironment: data.activeEnvironment } : {}),
-      ...(data.sandboxClientId !== undefined ? { sandboxClientId: data.sandboxClientId } : {}),
-      ...(data.sandboxClientSecret ? { sandboxClientSecretEnc: encryptSecret(data.sandboxClientSecret) } : {}),
-      ...(data.prodClientId !== undefined ? { prodClientId: data.prodClientId } : {}),
-      ...(data.prodClientSecret ? { prodClientSecretEnc: encryptSecret(data.prodClientSecret) } : {}),
+      ...(data.clientId !== undefined ? { prodClientId: data.clientId } : {}),
+      ...(data.clientSecret ? { prodClientSecretEnc: encryptSecret(data.clientSecret) } : {}),
     };
     await this.prisma.platformEcfConfig.upsert({
       where: { id: this.PLATFORM_ID },
       create: { id: this.PLATFORM_ID, ...patch },
       update: patch,
     });
-    // credenciales cambiaron → invalidar ambos tokens cacheados
-    this.pronesoft.invalidateToken('sandbox');
+    // credenciales cambiaron → invalidar token cacheado
     this.pronesoft.invalidateToken('prod');
     return this.getPlatformConfig();
   }
 
-  /** Resuelve la credencial matriz activa; lanza si no está configurada. */
+  /** Resuelve la credencial matriz de producción; lanza si no está configurada. */
   private async resolveMatrizCreds() {
     const c = await this.prisma.platformEcfConfig.findUnique({ where: { id: this.PLATFORM_ID } });
     if (!c?.enabled) throw new BadRequestException('e-CF de plataforma no configurado/deshabilitado');
-    const env = c.activeEnvironment;
-    const clientId = env === 'prod' ? c.prodClientId : c.sandboxClientId;
-    const secretEnc = env === 'prod' ? c.prodClientSecretEnc : c.sandboxClientSecretEnc;
+    const clientId = c.prodClientId;
+    const secretEnc = c.prodClientSecretEnc;
     if (!clientId || !secretEnc) {
-      throw new BadRequestException(`Faltan credenciales de Pronesoft para el ambiente ${env}`);
+      throw new BadRequestException('Faltan las credenciales de Pronesoft de la empresa matriz');
     }
-    return { environment: env, clientId, clientSecret: decryptSecret(secretEnc) };
+    return { environment: 'prod', clientId, clientSecret: decryptSecret(secretEnc) };
   }
 
   // ─────────────────── config e-CF por comercio (vínculo) ───────────────────
@@ -117,7 +107,6 @@ export class EcfService {
       pronesoftBusinessId: config?.pronesoftBusinessId ?? null,
       pronesoftRnc: config?.pronesoftRnc ?? null,
       platformEnabled: platform?.enabled ?? false,
-      platformEnvironment: platform?.activeEnvironment ?? 'sandbox',
       updatedAt: config?.updatedAt,
     };
   }
