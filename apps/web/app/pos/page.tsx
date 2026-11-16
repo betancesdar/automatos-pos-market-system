@@ -132,6 +132,9 @@ export default function POSPage() {
   const [suggestedName, setSuggestedName] = useState('');
 
   const [receiptType, setReceiptType] = useState<ReceiptTypeValue>('VENTA_RAPIDA');
+  // Por defecto la factura es de CONTADO (sin comprobante). El modo fiscal se
+  // activa con el botón «Factura con comprobante fiscal».
+  const [fiscalMode, setFiscalMode] = useState(false);
   const [applyItbis, setApplyItbis] = useState(false);
   const [clientRnc, setClientRnc] = useState('');
   const [clientName, setClientName] = useState('');
@@ -331,7 +334,10 @@ export default function POSPage() {
     );
     setDiscountAmount(0);
     const orderNcf = RECEIPT_TYPES.find((r) => r.value === order.ncfType);
-    if (orderNcf) setReceiptType(orderNcf.value);
+    if (orderNcf) {
+      setReceiptType(orderNcf.value);
+      setFiscalMode(orderNcf.value !== 'VENTA_RAPIDA' && orderNcf.value !== 'SIN_NCF');
+    }
     setClientRnc(order.clientRnc ?? '');
     setClientName(order.clientName ?? '');
   };
@@ -424,6 +430,9 @@ export default function POSPage() {
     setClientRnc('');
     setClientName('');
     setRncLookup('idle');
+    // La próxima venta arranca como factura de contado por defecto.
+    setFiscalMode(false);
+    setReceiptType('VENTA_RAPIDA');
   };
 
   /**
@@ -674,7 +683,23 @@ export default function POSPage() {
     setShowDiscountModal(false);
   };
 
+  /** Activa el modo fiscal con el comprobante de consumo (el más común). */
+  const enableFiscal = () => {
+    setFiscalMode(true);
+    setReceiptType('CONSUMIDOR_FINAL');
+  };
+
+  /** Vuelve a factura de contado (sin comprobante). */
+  const disableFiscal = () => {
+    setFiscalMode(false);
+    setReceiptType('VENTA_RAPIDA');
+    setClientRnc('');
+    setClientName('');
+    setRncLookup('idle');
+  };
+
   const focusClientRnc = () => {
+    setFiscalMode(true);
     setReceiptType('CREDITO_FISCAL');
     requestAnimationFrame(() => clientRncRef.current?.focus());
   };
@@ -1092,14 +1117,32 @@ export default function POSPage() {
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           {/* Fiscal options */}
           <div className="shrink-0 space-y-3 border-b border-slate-200 px-4 py-3">
+            {!fiscalMode ? (
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+                <div>
+                  <p className="text-sm font-semibold text-slate-700">🧾 Factura de contado</p>
+                  <p className="text-[11px] text-slate-400">Sin comprobante fiscal (NCF)</p>
+                </div>
+                <button type="button" onClick={enableFiscal}
+                  className="shrink-0 rounded-lg border border-indigo-300 bg-white px-3 py-2 text-xs font-bold text-indigo-600 hover:bg-indigo-50">
+                  Factura con comprobante fiscal
+                </button>
+              </div>
+            ) : (
+              <>
             <div>
-              <label className="mb-1 block text-xs font-semibold text-slate-600">Tipo de Comprobante / NCF</label>
+              <div className="mb-1 flex items-center justify-between">
+                <label className="text-xs font-semibold text-slate-600">Tipo de Comprobante / NCF</label>
+                <button type="button" onClick={disableFiscal} className="text-[11px] font-semibold text-slate-400 hover:text-slate-700">
+                  ← Volver a contado
+                </button>
+              </div>
               <select
                 value={receiptType}
                 onChange={(e) => setReceiptType(e.target.value as ReceiptTypeValue)}
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400"
               >
-                {RECEIPT_TYPES.map((r) => (
+                {RECEIPT_TYPES.filter((r) => r.value !== 'VENTA_RAPIDA' && r.value !== 'SIN_NCF').map((r) => (
                   <option key={r.value} value={r.value}>{r.label}</option>
                 ))}
               </select>
@@ -1142,6 +1185,8 @@ export default function POSPage() {
                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400" />
                 </div>
               </div>
+            )}
+              </>
             )}
           </div>
 
