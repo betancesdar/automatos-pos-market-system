@@ -4,8 +4,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { AdminShell } from '../../../components/admin/AdminShell';
 import { useAuth } from '../../../lib/auth-context';
 import { apiFetch } from '../../../lib/api';
+import { LedgerPanel } from '../../../components/admin/LedgerPanel';
 
-type Tab = 'dashboard' | 'reconciliations' | 'purchases' | 'entries' | 'reports' | 'periods' | 'ecf';
+type Tab = 'dashboard' | 'reconciliations' | 'purchases' | 'entries' | 'ledger' | 'reports' | 'periods' | 'ecf';
 
 interface DashboardData {
   period: string;
@@ -334,6 +335,7 @@ export default function AccountingPage() {
     { key: 'reconciliations', label: '💵 Conciliaciones' },
     { key: 'purchases', label: '🧾 Compras/Gastos' },
     { key: 'entries', label: '📒 Movimientos' },
+    { key: 'ledger', label: '📘 Libro Contable' },
     { key: 'reports', label: '📑 Reportes DGII' },
     { key: 'periods', label: '🔒 Cierre Mensual' },
     ...(isAdmin ? [{ key: 'ecf' as Tab, label: '⚡ e-CF' }] : []),
@@ -825,6 +827,10 @@ export default function AccountingPage() {
             flash={flash}
             fail={fail}
           />
+        )}
+
+        {tab === 'ledger' && (
+          <LedgerPanel tenantId={tenantId} canManage={isAdmin} />
         )}
       </div>
 

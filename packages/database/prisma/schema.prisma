@@ -63,6 +63,9 @@ model Tenant {
   supplierInvoices  SupplierInvoice[]
   supplierPayments  SupplierPayment[]
   stockMovements    StockMovement[]
+  accounts          Account[]
+  journalEntries    JournalEntry[]
+  accountMappings   AccountMapping[]
 }
 
 model User {
@@ -849,4 +852,87 @@ model StockMovement {
 
   @@index([tenantId, createdAt])
   @@index([productId, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Contabilidad de partida doble (Fase 8): catálogo de cuentas, asientos de diario
+// con líneas débito/crédito, mapeo de cuentas para auto-posting desde ventas/compras,
+// libro diario/mayor y estados financieros. Dinero en Decimal.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  INCOME
+  EXPENSE
+}
+
+model Account {
+  id        String        @id @default(uuid())
+  tenantId  String
+  tenant    Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code      String
+  name      String
+  type      AccountType
+  parentId  String?
+  parent    Account?      @relation("AccountTree", fields: [parentId], references: [id])
+  children  Account[]     @relation("AccountTree")
+  active    Boolean       @default(true)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  lines     JournalLine[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, type])
+}
+
+enum JournalSourceType {
+  SALE
+  PURCHASE
+  CREDIT_PAYMENT
+  SUPPLIER_PAYMENT
+  CASH
+  MANUAL
+}
+
+model JournalEntry {
+  id          String            @id @default(uuid())
+  tenantId    String
+  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  date        DateTime
+  memo        String?
+  sourceType  JournalSourceType @default(MANUAL)
+  sourceId    String? // id de la venta/compra/pago que lo originó (idempotencia)
+  createdById String?
+  createdAt   DateTime          @default(now())
+  lines       JournalLine[]
+
+  @@unique([tenantId, sourceType, sourceId])
+  @@index([tenantId, date])
+}
+
+model JournalLine {
+  id             String       @id @default(uuid())
+  journalEntryId String
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  accountId      String
+  account        Account      @relation(fields: [accountId], references: [id])
+  debit          Decimal      @default(0) @db.Decimal(14, 2)
+  credit         Decimal      @default(0) @db.Decimal(14, 2)
+
+  @@index([journalEntryId])
+  @@index([accountId])
+}
+
+// Mapeo de roles contables → cuenta del catálogo, para el auto-posting. Ej.
+// role "SALES_INCOME" → cuenta 4101. Configurable por tenant; se siembra por defecto.
+model AccountMapping {
+  id        String @id @default(uuid())
+  tenantId  String
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  role      String
+  accountId String
+
+  @@unique([tenantId, role])
 }
