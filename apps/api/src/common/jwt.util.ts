@@ -1,7 +1,7 @@
 import { sign, verify, type JwtPayload } from 'jsonwebtoken';
 
 export const LICENSE_BLOCKED_MESSAGE =
-  'Su licencia de MiniMarket OS ha expirado o se encuentra suspendida. Contacte al administrador (Darío Betances)';
+  'Su licencia de Automatos ha expirado o se encuentra suspendida. Contacte al administrador (Darío Betances)';
 
 export interface TokenPayload extends JwtPayload {
   sub: string;

@@ -271,7 +271,7 @@ export default function SuperadminPage() {
         <div className="mx-auto flex max-w-7xl items-center justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-violet-400">Panel de Darío</p>
-            <h1 className="text-xl font-bold">MiniMarket OS · Super Admin</h1>
+            <h1 className="text-xl font-bold">Automatos · Super Admin</h1>
             {user && <p className="text-sm text-slate-500">{user.name}</p>}
           </div>
           <button onClick={logout} className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-400 hover:text-white">

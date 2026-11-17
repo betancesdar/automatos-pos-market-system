@@ -176,7 +176,7 @@ export function buildThermalReceiptHtml(data: ThermalReceiptData): string {
         ? `<div class="qr"><img src="${escapeHtml(data.qrCodeUrl)}" alt="QR" /></div>`
         : ''
     }
-    <div class="legal">MiniMarket OS</div>
+    <div class="legal">Automatos</div>
   </div>
 </body>
 </html>`;

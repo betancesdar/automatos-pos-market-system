@@ -15,11 +15,11 @@ export function LicenseBlockedScreen({ message, onLogout }: LicenseBlockedScreen
         <h1 className="text-2xl font-bold text-white">Acceso Suspendido</h1>
         <p className="mt-4 text-base leading-relaxed text-slate-400">
           {message ||
-            'Su licencia de MiniMarket OS ha expirado o se encuentra suspendida. Contacte al administrador (Darío Betances).'}
+            'Su licencia de Automatos ha expirado o se encuentra suspendida. Contacte al administrador (Darío Betances).'}
         </p>
         <div className="mt-8 space-y-3">
           <a
-            href="mailto:dario@minimarket-os.com"
+            href="mailto:dario@automatostech.com"
             className="block rounded-xl bg-indigo-600 py-3 font-semibold text-white hover:bg-indigo-500"
           >
             Contactar Soporte

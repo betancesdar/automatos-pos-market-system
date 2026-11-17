@@ -444,7 +444,7 @@ export default function POSPage() {
    */
   const finalizeSaleOffline = async (received: number) => {
     const body = buildCheckoutBody(received);
-    const tenantProfile = loadTenantProfile(tenantId) ?? { name: 'MiniMarket' };
+    const tenantProfile = loadTenantProfile(tenantId) ?? { name: 'Mi Negocio' };
 
     await queuePendingSale(tenantId, body, {
       total: grandTotal,

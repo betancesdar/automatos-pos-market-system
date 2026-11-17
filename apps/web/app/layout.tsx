@@ -13,8 +13,8 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "MiniMarket OS — POS & Admin para Colmados",
-  description: "Sistema de punto de venta, inventario y contabilidad fiscal para minimarkets en República Dominicana.",
+  title: "Automatos — Punto de Venta y Gestión Comercial",
+  description: "Automatos (por Ebtech Group Corp) centraliza punto de venta, inventario, crédito y facturación fiscal electrónica para comercios — nacido en República Dominicana, listo para expandirse a toda Latinoamérica.",
 };
 
 export default function RootLayout({

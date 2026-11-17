@@ -10,6 +10,7 @@ import {
   type MotionValue,
 } from 'framer-motion';
 import { useAuth } from '../lib/auth-context';
+import { AutomatosMark } from '../components/AutomatosMark';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Helpers de movimiento (puramente visuales — no tocan ninguna ruta/función)
@@ -167,11 +168,9 @@ export default function HomePage() {
       >
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-sm font-black text-white shadow-lg shadow-indigo-500/30">
-              M
-            </span>
+            <AutomatosMark />
             <span className="text-lg font-bold tracking-tight text-white">
-              <span className="text-indigo-400">Mini</span>Market OS
+              Automatos
             </span>
           </div>
 
@@ -559,8 +558,8 @@ export default function HomePage() {
         <div className="mx-auto max-w-7xl px-6">
           <div className="flex flex-col items-center justify-between gap-4 sm:flex-row">
             <div className="flex items-center gap-2">
-              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 text-xs font-black text-white">M</span>
-              <span className="text-sm font-bold text-white">MiniMarket OS</span>
+              <AutomatosMark className="h-7 w-7" />
+              <span className="text-sm font-bold text-white">Automatos</span>
             </div>
             <div className="flex gap-6 text-sm text-slate-500">
               <Link href="/pos" className="hover:text-slate-300">POS</Link>
@@ -570,7 +569,7 @@ export default function HomePage() {
             <p className="text-xs text-slate-600">Nacido en RD 🇩🇴 · Listo para el mundo 🌎</p>
           </div>
           <div className="mt-8 border-t border-white/5 pt-6 text-center text-xs text-slate-600">
-            © {new Date().getFullYear()} Ebtech Group Corp. Todos los derechos reservados. MiniMarket OS es un producto de Ebtech Group Corp.
+            © {new Date().getFullYear()} Ebtech Group Corp. Todos los derechos reservados. Automatos es un producto de Ebtech Group Corp.
           </div>
         </div>
       </footer>

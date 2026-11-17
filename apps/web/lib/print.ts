@@ -46,7 +46,7 @@ export function printDocument(title: string, bodyHtml: string) {
 </head>
 <body>
   ${bodyHtml}
-  <div class="footer">Generado por MiniMarket OS · ${new Date().toLocaleString('es-DO')}</div>
+  <div class="footer">Generado por Automatos · ${new Date().toLocaleString('es-DO')}</div>
 </body>
 </html>`);
   win.document.close();
