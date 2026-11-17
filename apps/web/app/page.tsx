@@ -115,7 +115,7 @@ const MARQUEE_ITEMS = [
 
 const FEATURES = [
   { icon: '🛒', title: 'Punto de Venta', desc: 'Carrito como protagonista, panel de productos flotante, escaneo de código de barra y pago en efectivo, tarjeta o transferencia.', color: 'from-emerald-400 to-emerald-600' },
-  { icon: '🧾', title: 'Facturación Electrónica', desc: 'Comprobantes fiscales (NCF / e-CF) integrados con Pronesoft y la DGII. El RNC autocompleta el nombre del cliente.', color: 'from-indigo-400 to-indigo-600' },
+  { icon: '🧾', title: 'Facturación Electrónica', desc: 'Comprobantes fiscales (NCF / e-CF) conectados directamente con la DGII. El RNC autocompleta el nombre del cliente.', color: 'from-indigo-400 to-indigo-600' },
   { icon: '📦', title: 'Inventario', desc: 'Zonas de almacén, fotos o tabla compacta según tu negocio, e importación/exportación en CSV, Excel o desde tu sistema anterior (XPS).', color: 'from-amber-400 to-amber-600' },
   { icon: '💳', title: 'Crédito y Cobros', desc: 'Ventas a crédito por cuotas o por días, pagaré notarial automático, y mora configurable (o condonable) por cliente.', color: 'from-rose-400 to-rose-600' },
   { icon: '🔒', title: 'Control de Caja', desc: 'Apertura y cierre con cuadre a ciegas, movimientos de entrada/salida, y la opción de pasar el efectivo contado como fondo del siguiente turno.', color: 'from-cyan-400 to-cyan-600' },
@@ -189,7 +189,7 @@ export default function HomePage() {
                 <span className="hidden text-sm text-slate-400 sm:inline">
                   {user.name}
                 </span>
-                <Link href={panelHref} className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-900 shadow-sm transition-colors hover:bg-slate-100">
+                <Link href={panelHref} className="rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-indigo-500/30 transition-transform hover:scale-[1.03]">
                   {panelLabel}
                 </Link>
                 <button onClick={logout} className="rounded-xl px-3 py-2 text-sm font-medium text-slate-400 transition-colors hover:text-white">
@@ -234,7 +234,7 @@ export default function HomePage() {
               transition={{ duration: 0.5 }}
               className="mb-5 inline-flex items-center gap-2 rounded-full border border-indigo-400/30 bg-indigo-500/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-indigo-300"
             >
-              🇩🇴 Hecho para colmados, minimarkets y ferreterías de RD
+              🇩🇴 Nacido en RD · Diseñado para escalar a toda Latinoamérica
             </motion.p>
             <motion.h1
               initial={{ opacity: 0, y: 16 }}
@@ -407,7 +407,7 @@ export default function HomePage() {
                 {[
                   'Factura de contado por defecto — el comprobante fiscal es una opción aparte, no estorba el día a día',
                   'Al escribir el RNC, el nombre del cliente se autocompleta desde el padrón de la DGII',
-                  'e-CF integrado con Pronesoft: NCF 31, 32 y 45 según el tipo de venta',
+                  'e-CF conectado directamente con la DGII: NCF 31, 32 y 45 según el tipo de venta',
                   'Un SuperAdmin centraliza las credenciales fiscales de todos tus comercios',
                 ].map((t) => (
                   <li key={t} className="flex items-start gap-3 text-slate-300">
@@ -540,13 +540,13 @@ export default function HomePage() {
             Tu negocio merece un sistema a la altura
           </h2>
           <p className="mx-auto mt-4 max-w-xl text-indigo-100">
-            Vende, factura y controla tu inventario desde un solo lugar — hecho para la realidad
-            fiscal de República Dominicana.
+            Vende, factura y controla tu inventario desde un solo lugar — nacido en República
+            Dominicana, construido para crecer a otros países.
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-4">
             <Link
               href={panelHref}
-              className="rounded-2xl bg-white px-8 py-3.5 text-base font-bold text-indigo-700 shadow-xl transition-transform hover:scale-[1.03]"
+              className="rounded-2xl bg-slate-950 px-8 py-3.5 text-base font-bold text-white shadow-xl transition-transform hover:scale-[1.03] hover:bg-slate-900"
             >
               {!user ? 'Iniciar Sesión' : panelLabel}
             </Link>
@@ -556,17 +556,22 @@ export default function HomePage() {
 
       {/* ── Footer ── */}
       <footer className="border-t border-white/5 bg-slate-950 py-10">
-        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-6 sm:flex-row">
-          <div className="flex items-center gap-2">
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 text-xs font-black text-white">M</span>
-            <span className="text-sm font-bold text-white">MiniMarket OS</span>
+        <div className="mx-auto max-w-7xl px-6">
+          <div className="flex flex-col items-center justify-between gap-4 sm:flex-row">
+            <div className="flex items-center gap-2">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 text-xs font-black text-white">M</span>
+              <span className="text-sm font-bold text-white">MiniMarket OS</span>
+            </div>
+            <div className="flex gap-6 text-sm text-slate-500">
+              <Link href="/pos" className="hover:text-slate-300">POS</Link>
+              <Link href="/admin" className="hover:text-slate-300">Admin</Link>
+              <Link href="/login" className="hover:text-slate-300">Login</Link>
+            </div>
+            <p className="text-xs text-slate-600">Nacido en RD 🇩🇴 · Listo para el mundo 🌎</p>
           </div>
-          <div className="flex gap-6 text-sm text-slate-500">
-            <Link href="/pos" className="hover:text-slate-300">POS</Link>
-            <Link href="/admin" className="hover:text-slate-300">Admin</Link>
-            <Link href="/login" className="hover:text-slate-300">Login</Link>
+          <div className="mt-8 border-t border-white/5 pt-6 text-center text-xs text-slate-600">
+            © {new Date().getFullYear()} Ebtech Group Corp. Todos los derechos reservados. MiniMarket OS es un producto de Ebtech Group Corp.
           </div>
-          <p className="text-xs text-slate-600">Hecho en República Dominicana 🇩🇴</p>
         </div>
       </footer>
     </div>
