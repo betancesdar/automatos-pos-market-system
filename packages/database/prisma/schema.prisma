@@ -59,6 +59,10 @@ model Tenant {
   customers         Customer[]
   quotes            Quote[]
   zones             Zone[]
+  suppliers         Supplier[]
+  supplierInvoices  SupplierInvoice[]
+  supplierPayments  SupplierPayment[]
+  stockMovements    StockMovement[]
 }
 
 model User {
@@ -151,6 +155,8 @@ model Product {
   updatedAt     DateTime    @updatedAt
   saleItems     SaleItem[]
   orderItems    OrderItem[]
+  supplierItems SupplierInvoiceItem[]
+  stockMovements StockMovement[]
 
   @@unique([barcode, tenantId])
   @@unique([sku, tenantId])
@@ -725,4 +731,122 @@ model PromissoryNote {
   signedAt       DateTime?
   notaryInfo     String?
   createdAt      DateTime   @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Compras / Proveedores (Fase 7): maestro de proveedores, facturas de compra con
+// balance (cuentas por pagar), abonos, y movimientos de inventario con auditoría.
+// Dinero en Decimal (ver prisma/money.md).
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Supplier {
+  id        String            @id @default(uuid())
+  tenantId  String
+  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  rnc       String?
+  phone     String?
+  email     String?
+  address   String?
+  balance   Decimal           @default(0) @db.Decimal(14, 2) // saldo por pagar (cuentas por pagar)
+  notes     String?
+  active    Boolean           @default(true)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  invoices  SupplierInvoice[]
+
+  @@unique([tenantId, rnc])
+  @@index([tenantId, name])
+}
+
+enum SupplierInvoiceStatus {
+  PENDING
+  PARTIAL
+  PAID
+}
+
+model SupplierInvoice {
+  id            String                @id @default(uuid())
+  tenantId      String
+  tenant        Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supplierId    String
+  supplier      Supplier              @relation(fields: [supplierId], references: [id])
+  invoiceNumber String
+  ncf           String?
+  date          DateTime
+  dueDate       DateTime?
+  subtotal      Decimal               @default(0) @db.Decimal(14, 2)
+  itbis         Decimal               @default(0) @db.Decimal(14, 2)
+  total         Decimal               @default(0) @db.Decimal(14, 2)
+  balance       Decimal               @default(0) @db.Decimal(14, 2) // saldo pendiente de esta factura
+  status        SupplierInvoiceStatus @default(PENDING)
+  sourceFileUrl String?               // PDF/foto original (Fase 3)
+  notes         String?
+  createdById   String
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  items         SupplierInvoiceItem[]
+  payments      SupplierPayment[]
+
+  @@index([tenantId, date])
+  @@index([supplierId])
+}
+
+model SupplierInvoiceItem {
+  id                String          @id @default(uuid())
+  supplierInvoiceId String
+  supplierInvoice   SupplierInvoice @relation(fields: [supplierInvoiceId], references: [id], onDelete: Cascade)
+  productId         String?
+  product           Product?        @relation(fields: [productId], references: [id])
+  rawName           String // nombre tal cual viene en la factura del proveedor
+  quantity          Float
+  unitCost          Decimal         @db.Decimal(14, 2)
+  total             Decimal         @db.Decimal(14, 2)
+
+  @@index([supplierInvoiceId])
+}
+
+model SupplierPayment {
+  id                String          @id @default(uuid())
+  tenantId          String
+  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supplierInvoiceId String
+  supplierInvoice   SupplierInvoice @relation(fields: [supplierInvoiceId], references: [id], onDelete: Cascade)
+  amount            Decimal         @db.Decimal(14, 2)
+  method            PaymentMethod   @default(CASH)
+  note              String?
+  createdById       String
+  createdAt         DateTime        @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([supplierInvoiceId])
+}
+
+enum StockMovementType {
+  PURCHASE_RECEIPT
+  SALE
+  ADJUSTMENT
+  IMPORT
+}
+
+// Libro de movimientos de inventario: primera auditoría de cambios de stock del
+// sistema (antes el stock era un contador mutable sin historia). Se escribe al
+// recibir una compra; ventas/ajustes/import se irán integrando incrementalmente.
+model StockMovement {
+  id             String            @id @default(uuid())
+  tenantId       String
+  tenant         Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  type           StockMovementType
+  quantityDelta  Float // + entra, - sale
+  resultingStock Int
+  referenceType  String? // ej. "SupplierInvoice", "Sale"
+  referenceId    String?
+  note           String?
+  createdById    String?
+  createdAt      DateTime          @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([productId, createdAt])
 }

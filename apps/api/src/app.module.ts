@@ -22,6 +22,7 @@ import { CustomersModule } from './modules/customers/customers.module';
 import { QuotesModule } from './modules/quotes/quotes.module';
 import { CreditModule } from './modules/credit/credit.module';
 import { ZonesModule } from './modules/zones/zones.module';
+import { PurchasingModule } from './modules/purchasing/purchasing.module';
 import { AuditModule } from './common/audit.module';
 import { TenantLicenseMiddleware } from './common/tenant-license.middleware';
 import { ThrottlerModule } from '@nestjs/throttler';
@@ -52,6 +53,7 @@ import { JwtAuthGuard, PermissionsGuard } from './common/auth.guard';
     QuotesModule,
     CreditModule,
     ZonesModule,
+    PurchasingModule,
     AuditModule,
   ],
   controllers: [AppController],

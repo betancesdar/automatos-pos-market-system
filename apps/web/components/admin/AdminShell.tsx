@@ -17,6 +17,7 @@ const NAV: NavItem[] = [
   { href: '/admin/quotes', label: 'Cotizaciones', icon: '📝' },
   { href: '/admin/credit', label: 'Crédito', icon: '💳' },
   { href: '/admin/customers', label: 'Clientes', icon: '👤' },
+  { href: '/admin/purchasing', label: 'Compras', icon: '🛍️' },
   { href: '/admin/shifts', label: 'Turnos & Caja', icon: '💵' },
   { href: '/admin/reports', label: 'Reportes', icon: '📈' },
   { href: '/admin/accounting', label: 'Contabilidad', icon: '🧮' },
@@ -70,9 +71,7 @@ export function AdminShell({
         {/* Sidebar (desktop) */}
         <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-slate-200 bg-white p-4 lg:flex">
           <div className="mb-6 px-2">
-            <h1 className="text-lg font-bold tracking-tight">
-              <span className="text-indigo-600">Mini</span>Market OS
-            </h1>
+            <h1 className="text-lg font-bold tracking-tight text-slate-900">Automatos</h1>
             <p className="text-xs text-slate-400">Panel de administración</p>
           </div>
           <NavLinks />
@@ -98,9 +97,7 @@ export function AdminShell({
             <div className="absolute inset-0 bg-slate-900/40" onClick={() => setMobileOpen(false)} />
             <aside className="absolute left-0 top-0 flex h-full w-64 flex-col border-r border-slate-200 bg-white p-4">
               <div className="mb-6 flex items-center justify-between px-2">
-                <h1 className="text-lg font-bold">
-                  <span className="text-indigo-600">Mini</span>Market OS
-                </h1>
+                <h1 className="text-lg font-bold text-slate-900">Automatos</h1>
                 <button onClick={() => setMobileOpen(false)} className="text-slate-400">✕</button>
               </div>
               <NavLinks />

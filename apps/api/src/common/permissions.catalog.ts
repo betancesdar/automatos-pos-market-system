@@ -44,6 +44,9 @@ export const PERMISSIONS: PermissionDef[] = [
   { code: 'accounting.view', label: 'Ver contabilidad', group: 'Contabilidad' },
   { code: 'accounting.manage', label: 'Registrar compras, conciliar y cerrar período', group: 'Contabilidad' },
   { code: 'accounting.period.reopen', label: 'Reabrir período contable', group: 'Contabilidad' },
+  // Compras / Proveedores
+  { code: 'purchases.view', label: 'Ver compras y proveedores', group: 'Compras' },
+  { code: 'purchases.manage', label: 'Registrar proveedores, facturas de compra y pagos', group: 'Compras' },
   // e-CF
   { code: 'ecf.view', label: 'Ver envíos e-CF', group: 'Facturación electrónica' },
   { code: 'ecf.manage', label: 'Configurar e-CF y reintentar', group: 'Facturación electrónica' },
@@ -116,6 +119,8 @@ export const ROLE_DEFAULTS: Record<string, string[]> = {
     'reports.view',
     'accounting.view',
     'accounting.manage',
+    'purchases.view',
+    'purchases.manage',
     'ecf.view',
     'customers.view',
     'quotes.view',
