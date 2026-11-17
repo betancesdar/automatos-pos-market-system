@@ -206,6 +206,59 @@ export class AiAssistantService {
     return { available: await this.client.health() };
   }
 
+  /**
+   * Lee una foto/imagen de una factura de proveedor con el modelo de visión y
+   * devuelve los datos extraídos (proveedor, NCF, fecha, líneas) con sugerencia
+   * de producto existente por nombre. El usuario SIEMPRE revisa antes de aplicar.
+   */
+  async scanInvoice(tenantId: string, imageBase64: string) {
+    if (!this.client.configured) {
+      throw new ServiceUnavailableException('El asistente IA no está configurado en este servidor.');
+    }
+    if (!(await this.client.health())) {
+      throw new ServiceUnavailableException('El asistente no está disponible ahora mismo. Intenta más tarde.');
+    }
+
+    const prompt =
+      `Eres un lector experto de facturas de proveedores de República Dominicana. ` +
+      `Lee la imagen y extrae los datos. Responde ÚNICAMENTE con un JSON válido, sin texto antes ni después, con esta forma exacta:\n` +
+      `{"supplierName": string|null, "rnc": string|null, "ncf": string|null, "date": "YYYY-MM-DD"|null, "lines": [{"rawName": string, "quantity": number, "unitCost": number}]}\n` +
+      `Reglas: "unitCost" es el costo por unidad (no el total de la línea). Si un dato no aparece, usa null. Si no hay líneas, usa []. No inventes productos que no estén en la factura.`;
+
+    const raw = await this.client.scanImage(prompt, imageBase64);
+    const parsed = extractJson(raw);
+    if (!parsed) {
+      return { ok: false, supplierName: null, rnc: null, ncf: null, date: null, lines: [], note: 'No se pudo interpretar la factura. Intenta con una foto más nítida o captura las líneas a mano.' };
+    }
+
+    const rawLines = Array.isArray(parsed.lines) ? parsed.lines : [];
+    const products = await this.prisma.product.findMany({
+      where: { tenantId },
+      select: { id: true, name: true, barcode: true, sku: true },
+    });
+    const byName = new Map(products.map((p) => [normalizeName(p.name), p]));
+
+    const lines = rawLines
+      .map((l) => {
+        const rawName = String((l as Record<string, unknown>).rawName ?? '').trim();
+        if (!rawName) return null;
+        const quantity = Number((l as Record<string, unknown>).quantity) || 1;
+        const unitCost = Number((l as Record<string, unknown>).unitCost) || 0;
+        const match = byName.get(normalizeName(rawName)) ?? null;
+        return { rawName, quantity, unitCost, productId: match?.id ?? null, matchedName: match?.name ?? null };
+      })
+      .filter(Boolean);
+
+    return {
+      ok: true,
+      supplierName: typeof parsed.supplierName === 'string' ? parsed.supplierName : null,
+      rnc: typeof parsed.rnc === 'string' ? parsed.rnc : null,
+      ncf: typeof parsed.ncf === 'string' ? parsed.ncf : null,
+      date: typeof parsed.date === 'string' ? parsed.date : null,
+      lines,
+    };
+  }
+
   async chat(tenantId: string, userName: string, history: { role: 'user' | 'assistant'; content: string }[], message: string) {
     if (!this.client.configured) {
       throw new ServiceUnavailableException('El asistente IA no está configurado en este servidor.');
@@ -266,5 +319,29 @@ export class AiAssistantService {
     } catch (e) {
       return { error: e instanceof Error ? e.message : 'Error ejecutando la consulta' };
     }
+  }
+}
+
+function normalizeName(s: string): string {
+  return (s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Extrae el primer objeto JSON del texto del modelo (tolera prosa alrededor). */
+function extractJson(text: string): Record<string, unknown> | null {
+  if (!text) return null;
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenced ? fenced[1] : text;
+  const start = candidate.indexOf('{');
+  const end = candidate.lastIndexOf('}');
+  if (start < 0 || end <= start) return null;
+  try {
+    return JSON.parse(candidate.slice(start, end + 1)) as Record<string, unknown>;
+  } catch {
+    return null;
   }
 }

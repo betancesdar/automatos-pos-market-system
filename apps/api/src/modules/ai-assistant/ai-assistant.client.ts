@@ -39,6 +39,7 @@ export class AiAssistantClient {
   private readonly logger = new Logger(AiAssistantClient.name);
   private readonly baseUrl = (process.env.AI_BASE_URL || '').replace(/\/$/, '');
   private readonly model = process.env.AI_MODEL || 'qwen2.5:7b-instruct-q4_K_M';
+  private readonly visionModel = process.env.AI_VISION_MODEL || 'minicpm-v';
   private readonly accessId = process.env.AI_ACCESS_CLIENT_ID || '';
   private readonly accessSecret = process.env.AI_ACCESS_CLIENT_SECRET || '';
 
@@ -92,6 +93,33 @@ export class AiAssistantClient {
         content: data.message?.content ?? '',
         toolCalls: data.message?.tool_calls ?? [],
       };
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
+  /**
+   * Lee una imagen (factura) con el modelo de visión y devuelve su respuesta de
+   * texto. `imageBase64` va SIN el prefijo "data:...;base64,".
+   */
+  async scanImage(prompt: string, imageBase64: string): Promise<string> {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 120_000);
+    try {
+      const res = await fetch(`${this.baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: this.headers(),
+        signal: ctrl.signal,
+        body: JSON.stringify({
+          model: this.visionModel,
+          stream: false,
+          options: { temperature: 0 },
+          messages: [{ role: 'user', content: prompt, images: [imageBase64] }],
+        }),
+      });
+      if (!res.ok) throw new Error(`Modelo de visión respondió ${res.status}`);
+      const data = (await res.json()) as { message?: { content?: string } };
+      return data.message?.content ?? '';
     } finally {
       clearTimeout(t);
     }

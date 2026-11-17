@@ -45,6 +45,8 @@ export function RegisterInvoiceModal({
   const [parsed, setParsed] = useState<ParseResult | null>(null);
   const [mapping, setMapping] = useState<string[]>([]);
   const [hasHeaderRow, setHasHeaderRow] = useState(true);
+  const [scanning, setScanning] = useState(false);
+  const [scanNote, setScanNote] = useState('');
 
   useEffect(() => {
     apiFetch<ProductOpt[]>('/catalog/products', tenantId)
@@ -73,6 +75,37 @@ export function RegisterInvoiceModal({
       setImportOpen(true);
     } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo leer el archivo'); }
     finally { setBusy(false); }
+  };
+
+  const scanWithAi = async (file: File) => {
+    setScanning(true); setError(''); setScanNote('');
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await apiUpload<{
+        ok: boolean; supplierName: string | null; rnc: string | null; ncf: string | null;
+        date: string | null; lines: Line[]; note?: string;
+      }>('/ai-assistant/scan-invoice', tenantId, fd);
+      if (!res.ok) { setScanNote(res.note || 'No se pudo interpretar la factura.'); return; }
+      if (res.ncf) setNcf(res.ncf);
+      if (res.date && /^\d{4}-\d{2}-\d{2}$/.test(res.date)) setDate(res.date);
+      // Emparejar proveedor por RNC o nombre.
+      if (res.rnc || res.supplierName) {
+        const match = suppliers.find((s) =>
+          (res.rnc && s.rnc && s.rnc.replace(/\D/g, '') === res.rnc.replace(/\D/g, '')) ||
+          (res.supplierName && s.name.toLowerCase().includes(res.supplierName.toLowerCase().slice(0, 10))));
+        if (match) setSupplierId(match.id);
+        else setScanNote(`Proveedor detectado: "${res.supplierName ?? res.rnc}". No existe aún — créalo o selecciónalo manualmente.`);
+      }
+      if (res.lines?.length) setLines((l) => [...l, ...res.lines]);
+      else setScanNote((n) => n || 'No se detectaron líneas de productos en la imagen.');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '';
+      if (/disponible|configurado|503/i.test(msg)) setError('El lector de facturas IA no está disponible ahora (la PC del modelo debe estar prendida).');
+      else setError(msg || 'Error al escanear la factura.');
+    } finally {
+      setScanning(false);
+    }
   };
 
   const applyImport = async () => {
@@ -170,9 +203,14 @@ export function RegisterInvoiceModal({
           <div>
             <div className="mb-2 flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-800">Líneas / productos</h3>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                <label className={`cursor-pointer rounded-lg border px-3 py-1.5 text-xs font-semibold ${scanning ? 'border-slate-200 text-slate-400' : 'border-violet-300 bg-violet-50 text-violet-700 hover:bg-violet-100'}`}>
+                  {scanning ? '✨ Leyendo factura…' : '📷 Escanear factura (IA)'}
+                  <input type="file" accept="image/*" capture="environment" className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) scanWithAi(f); e.target.value = ''; }} disabled={scanning || busy} />
+                </label>
                 <label className="cursor-pointer rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">
-                  {busy ? 'Leyendo…' : '📄 Importar de archivo'}
+                  {busy ? 'Leyendo…' : '📄 Importar CSV/Excel'}
                   <input type="file" accept=".csv,.xlsx,.xls,.xps,.txt" className="hidden"
                     onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ''; }} disabled={busy} />
                 </label>
@@ -181,6 +219,11 @@ export function RegisterInvoiceModal({
                 </button>
               </div>
             </div>
+            {scanNote && (
+              <div className="mb-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-700">
+                ✨ {scanNote}
+              </div>
+            )}
 
             {lines.length === 0 ? (
               <div className="rounded-xl border-2 border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">
