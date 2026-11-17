@@ -8,10 +8,15 @@ import dynamic from 'next/dynamic';
 // Import ImpersonationBanner with SSR disabled to prevent hydration issues
 const ImpersonationBanner = dynamic(
   () => import('../../components/ImpersonationBanner'),
-  { 
+  {
     ssr: false,
     loading: () => null
   }
+);
+
+const AiAssistantWidget = dynamic(
+  () => import('../../components/AiAssistantWidget').then((m) => m.AiAssistantWidget),
+  { ssr: false, loading: () => null }
 );
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -49,6 +54,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     <>
       <ImpersonationBanner />
       {children}
+      <AiAssistantWidget />
     </>
   );
 }

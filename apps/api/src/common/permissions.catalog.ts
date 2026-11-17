@@ -50,6 +50,8 @@ export const PERMISSIONS: PermissionDef[] = [
   // e-CF
   { code: 'ecf.view', label: 'Ver envíos e-CF', group: 'Facturación electrónica' },
   { code: 'ecf.manage', label: 'Configurar e-CF y reintentar', group: 'Facturación electrónica' },
+  // Asistente IA
+  { code: 'ai.chat', label: 'Usar el asistente IA', group: 'Asistente IA' },
   // Clientes y cotizaciones
   { code: 'customers.view', label: 'Ver clientes', group: 'Clientes' },
   { code: 'customers.manage', label: 'Crear/editar clientes', group: 'Clientes' },
@@ -122,6 +124,7 @@ export const ROLE_DEFAULTS: Record<string, string[]> = {
     'purchases.view',
     'purchases.manage',
     'ecf.view',
+    'ai.chat',
     'customers.view',
     'quotes.view',
     'credit.view',

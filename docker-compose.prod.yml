@@ -45,6 +45,11 @@ services:
       # Clave independiente para cifrar los secretos de Pronesoft (e-CF).
       ECF_SECRET_KEY: ${ECF_SECRET_KEY}
       CORS_ORIGINS: ${CORS_ORIGINS}
+      # Asistente IA (modelo local vía Cloudflare Tunnel en la PC casera).
+      AI_BASE_URL: ${AI_BASE_URL}
+      AI_MODEL: ${AI_MODEL}
+      AI_ACCESS_CLIENT_ID: ${AI_ACCESS_CLIENT_ID}
+      AI_ACCESS_CLIENT_SECRET: ${AI_ACCESS_CLIENT_SECRET}
     depends_on:
       - minimarket_postgres_prod
       - minimarket_redis_prod
